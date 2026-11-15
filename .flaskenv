@@ -1,0 +1,2 @@
+FLASK_APP=japp.py
+FLASK_DEBUG=1
