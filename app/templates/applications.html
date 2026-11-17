@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+
+{% block content %}
+  <h2>My applications</h2>
+  {% for application in applications %}
+    {% include "_job-application.html" %}
+  {% endfor %}
+{% endblock %}

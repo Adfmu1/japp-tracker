@@ -13,14 +13,32 @@ class JobApplication:
     stage: str
 
 
-DUMMY_APPLICATION = JobApplication(
-    id=1,
-    name="Acme Corp",
-    description="Backend developer role",
-    salary_min=4000,
-    salary_max=6000,
-    stage="1. Sent application",
-)
+DUMMY_APPLICATIONS = [
+    JobApplication(
+        id=1,
+        name="Acme Corp",
+        description="Backend developer role",
+        salary_min=4000,
+        salary_max=6000,
+        stage="1. Sent application",
+    ),
+    JobApplication(
+        id=2,
+        name="Globex",
+        description="Python developer",
+        salary_min=5000,
+        salary_max=7500,
+        stage="2. Meeting with X Tuesday 5 pm",
+    ),
+    JobApplication(
+        id=3,
+        name="Initech",
+        description="Junior backend role",
+        salary_min=3000,
+        salary_max=4500,
+        stage="1. Sent application",
+    ),
+]
 
 
 def create_app():
@@ -33,10 +51,14 @@ def create_app():
     @app.get("/")
     @app.get("/index")
     def index():
+        return render_template("index.html", current_user=True)
+
+    @app.get("/applications")
+    def applications():
         return render_template(
-            "index.html",
+            "applications.html",
             current_user=True,
-            application=DUMMY_APPLICATION,
+            applications=DUMMY_APPLICATIONS,
         )
 
     return app
