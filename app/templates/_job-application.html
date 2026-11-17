@@ -1,0 +1,16 @@
+<div>
+  <h2>{{ application.name }}</h2>
+  <p>{{ application.description }}</p>
+  <p>Salary: ${{ application.salary_min }} - ${{ application.salary_max }}</p>
+  <p>Stage: {{ application.stage }}</p>
+
+  {# TODO: enable when edit_job_application route exists
+  <a href="{{ url_for('edit_job_application', id=application.id) }}">Edit</a>
+  #}
+
+  {# TODO: enable when delete_job_application route exists
+  <form method="post" action="{{ url_for('delete_job_application', id=application.id) }}">
+    <button type="submit">Delete</button>
+  </form>
+  #}
+</div>
