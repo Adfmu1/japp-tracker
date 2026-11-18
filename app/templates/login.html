@@ -5,7 +5,7 @@
 {% block content %}
   <h2>Log in</h2>
 
-  <form method="post" action="{{ url_for('login', next=request.args.get('next')) }}">
+  <form method="post" action="{{ url_for('auth.login', next=request.args.get('next')) }}">
     {{ form.hidden_tag() }}
 
     <p>
@@ -32,5 +32,5 @@
     <p>{{ form.submit() }}</p>
   </form>
 
-  <p>No account? <a href="{{ url_for('register') }}">Register</a></p>
+  <p>No account? <a href="{{ url_for('auth.register') }}">Register</a></p>
 {% endblock %}
