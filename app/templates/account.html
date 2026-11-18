@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+
+{% block title %}Account{% endblock %}
+
+{% block content %}
+  <h2>Account</h2>
+
+  <div class="account-field">
+    <label for="account-username">Username</label>
+    <input id="account-username" type="text" value="{{ current_user.username }}" readonly>
+    <a href="{{ url_for('account.edit', field='username') }}">Change</a>
+  </div>
+
+  <div class="account-field">
+    <label for="account-email">Email</label>
+    <input id="account-email" type="email" value="{{ current_user.email }}" readonly>
+    <a href="{{ url_for('account.edit', field='email') }}">Change</a>
+  </div>
+
+  <div class="account-field">
+    <label for="account-password">Password</label>
+    <input id="account-password" type="text" value="*******" autocomplete="off" readonly>
+    <a href="{{ url_for('account.edit', field='password') }}">Change</a>
+  </div>
+{% endblock %}

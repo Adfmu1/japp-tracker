@@ -7,6 +7,7 @@ from flask_wtf import CSRFProtect
 
 from .config import Config
 from .models import User, db
+from .routes.account import bp as account_bp
 from .routes.applications import bp as applications_bp
 from .routes.auth import bp as auth_bp
 from .routes.main import bp as main_bp
@@ -35,6 +36,7 @@ def create_app():
 
     app.register_blueprint(main_bp)
     app.register_blueprint(auth_bp)
+    app.register_blueprint(account_bp)
     app.register_blueprint(applications_bp)
 
     return app
