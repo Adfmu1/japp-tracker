@@ -1,10 +1,26 @@
+import uuid
 from dataclasses import dataclass
 
-from flask import Flask, Response, render_template
+from flask import Flask, Response, flash, redirect, render_template, url_for
+from flask_login import LoginManager, current_user, login_required, login_user
 from flask_migrate import Migrate
+from flask_wtf import CSRFProtect
+from sqlalchemy.exc import IntegrityError
 
 from .config import Config
-from .models import db
+from .forms import RegistrationForm
+from .models import User, db
+
+login_manager = LoginManager()
+csrf = CSRFProtect()
+
+
+@login_manager.user_loader
+def load_user(user_id: str):
+    try:
+        return db.session.get(User, uuid.UUID(user_id))
+    except (ValueError, TypeError):
+        return None
 
 
 @dataclass
@@ -51,6 +67,9 @@ def create_app():
 
     db.init_app(app)
     Migrate(app, db)
+    csrf.init_app(app)
+    login_manager.init_app(app)
+    login_manager.login_view = "login"
 
     @app.get("/healthz")
     def healthz():
@@ -59,14 +78,48 @@ def create_app():
     @app.get("/")
     @app.get("/index")
     def index():
-        return render_template("index.html", current_user=True)
+        return render_template("index.html")
 
     @app.get("/applications")
+    @login_required
     def applications():
         return render_template(
             "applications.html",
-            current_user=True,
             applications=DUMMY_APPLICATIONS,
         )
+
+    @app.route("/register", methods=["GET", "POST"])
+    def register():
+        if current_user.is_authenticated:
+            return redirect(url_for("index"))
+
+        form = RegistrationForm()
+        if form.validate_on_submit():
+            username = form.username.data.strip()
+            email = form.email.data.strip().lower()
+
+            if db.session.execute(
+                db.select(User).filter_by(username=username)
+            ).scalar_one_or_none():
+                form.username.errors.append("Username already taken.")
+            elif db.session.execute(
+                db.select(User).filter_by(email=email)
+            ).scalar_one_or_none():
+                form.email.errors.append("Email already registered.")
+            else:
+                user = User(username=username, email=email)
+                user.set_password(form.password.data)
+                db.session.add(user)
+                try:
+                    db.session.commit()
+                except IntegrityError:
+                    db.session.rollback()
+                    flash("Username or email already in use.", "error")
+                else:
+                    login_user(user)
+                    flash("Registration successful.", "success")
+                    return redirect(url_for("applications"))
+
+        return render_template("register.html", form=form)
 
     return app

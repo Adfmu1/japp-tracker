@@ -13,7 +13,7 @@
   <div class="navbar">
     <a href="/">Home</a>
     <a href="/account">Account</a>
-    {% if current_user %}
+    {% if current_user.is_authenticated %}
       <a href="/applications">My applications</a>
       <a href="/logout">Log out</a>
     {% else %}
@@ -21,6 +21,16 @@
       <a href="/register">Register</a>
     {% endif %}
   </div>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      <div class="flashes">
+        {% for category, message in messages %}
+          <p>{{ category }}: {{ message }}</p>
+        {% endfor %}
+      </div>
+    {% endif %}
+  {% endwith %}
 
   <main>
     {% block content %}{% endblock %}
