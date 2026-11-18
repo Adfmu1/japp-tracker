@@ -162,9 +162,8 @@ def create_app():
                     db.session.rollback()
                     flash("Username or email already in use.", "error")
                 else:
-                    login_user(user)
-                    flash("Registration successful.", "success")
-                    return redirect(url_for("applications"))
+                    flash("Registration successful. Please log in.", "success")
+                    return redirect(url_for("login"))
 
         return render_template("register.html", form=form)
 
