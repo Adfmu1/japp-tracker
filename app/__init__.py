@@ -1,14 +1,21 @@
 import uuid
 from dataclasses import dataclass
+from urllib.parse import urljoin, urlsplit
 
-from flask import Flask, Response, flash, redirect, render_template, url_for
-from flask_login import LoginManager, current_user, login_required, login_user
+from flask import Flask, Response, flash, redirect, render_template, request, url_for
+from flask_login import (
+    LoginManager,
+    current_user,
+    login_required,
+    login_user,
+    logout_user,
+)
 from flask_migrate import Migrate
 from flask_wtf import CSRFProtect
 from sqlalchemy.exc import IntegrityError
 
 from .config import Config
-from .forms import RegistrationForm
+from .forms import LoginForm, RegistrationForm
 from .models import User, db
 
 login_manager = LoginManager()
@@ -21,6 +28,14 @@ def load_user(user_id: str):
         return db.session.get(User, uuid.UUID(user_id))
     except (ValueError, TypeError):
         return None
+
+
+def _is_safe_next(target: str) -> bool:
+    if not target.startswith("/") or target.startswith("//") or "\\" in target:
+        return False
+    host = urlsplit(request.host_url)
+    candidate = urlsplit(urljoin(request.host_url, target))
+    return candidate.scheme in {"http", "https"} and candidate.netloc == host.netloc
 
 
 @dataclass
@@ -87,6 +102,37 @@ def create_app():
             "applications.html",
             applications=DUMMY_APPLICATIONS,
         )
+
+    @app.route("/login", methods=["GET", "POST"])
+    def login():
+        if current_user.is_authenticated:
+            return redirect(url_for("index"))
+
+        form = LoginForm()
+        if form.validate_on_submit():
+            user = db.session.execute(
+                db.select(User).filter_by(username=form.username.data.strip())
+            ).scalar_one_or_none()
+
+            if user is None or not user.check_password(form.password.data):
+                flash("Invalid username or password.", "error")
+                return render_template("login.html", form=form)
+
+            login_user(user, remember=form.remember.data)
+            flash("Logged in successfully.", "success")
+            next_url = request.args.get("next")
+            if next_url and _is_safe_next(next_url):
+                return redirect(next_url)
+            return redirect(url_for("applications"))
+
+        return render_template("login.html", form=form)
+
+    @app.get("/logout")
+    @login_required
+    def logout():
+        logout_user()
+        flash("Logged out.", "success")
+        return redirect(url_for("index"))
 
     @app.route("/register", methods=["GET", "POST"])
     def register():
