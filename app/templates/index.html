@@ -1,5 +1,9 @@
 {% extends "base.html" %}
 
 {% block content %}
-  <p>Welcome to Japp.</p>
+  {% if current_user.is_authenticated %}
+    <p>Welcome to Japp, {{ current_user.username }}!</p>
+  {% else %}
+    <p>Welcome to Japp.</p>
+  {% endif %}
 {% endblock %}
