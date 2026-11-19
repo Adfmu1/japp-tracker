@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+
+{% block title %}Add application{% endblock %}
+
+{% block content %}
+  <h2>Add application</h2>
+
+  <form method="post">
+    {{ form.hidden_tag() }}
+
+    <p>
+      {{ form.name.label }}
+      {{ form.name(maxlength=120) }}
+    </p>
+    {% for error in form.name.errors %}
+      <p>{{ error }}</p>
+    {% endfor %}
+
+    <p>
+      {{ form.company.label }}
+      {{ form.company(maxlength=120) }}
+    </p>
+    {% for error in form.company.errors %}
+      <p>{{ error }}</p>
+    {% endfor %}
+
+    <p>
+      {{ form.description.label }}
+      {{ form.description(rows=4) }}
+    </p>
+    {% for error in form.description.errors %}
+      <p>{{ error }}</p>
+    {% endfor %}
+
+    <p>
+      {{ form.salary_min.label }}
+      {{ form.salary_min() }}
+    </p>
+    {% for error in form.salary_min.errors %}
+      <p>{{ error }}</p>
+    {% endfor %}
+
+    <p>
+      {{ form.salary_max.label }}
+      {{ form.salary_max() }}
+    </p>
+    {% for error in form.salary_max.errors %}
+      <p>{{ error }}</p>
+    {% endfor %}
+
+    <p>
+      {{ form.stage.label }}
+      {{ form.stage(maxlength=120) }}
+    </p>
+    {% for error in form.stage.errors %}
+      <p>{{ error }}</p>
+    {% endfor %}
+
+    <p>{{ form.submit() }}</p>
+  </form>
+
+  <p><a href="{{ url_for('applications.index') }}">Cancel</a></p>
+{% endblock %}
