@@ -1,8 +1,19 @@
 <div>
   <h2>{{ application.name }}</h2>
+  <p>Company: {{ application.company }}</p>
   <p>{{ application.description }}</p>
-  <p>Salary: ${{ application.salary_min }} - ${{ application.salary_max }}</p>
+  {% if application.salary_min is none and application.salary_max is none %}
+    <p>Salary: not specified</p>
+  {% elif application.salary_max is none %}
+    <p>Salary: from ${{ application.salary_min }}</p>
+  {% elif application.salary_min is none %}
+    <p>Salary: up to ${{ application.salary_max }}</p>
+  {% else %}
+    <p>Salary: ${{ application.salary_min }} - ${{ application.salary_max }}</p>
+  {% endif %}
   <p>Stage: {{ application.stage }}</p>
+  <p>Created: {{ application.created_at.strftime("%Y-%m-%d %H:%M") }}</p>
+  <p>Updated: {{ application.updated_at.strftime("%Y-%m-%d %H:%M") }}</p>
 
   {# TODO: enable when edit_job_application route exists
   <a href="{{ url_for('edit_job_application', id=application.id) }}">Edit</a>
