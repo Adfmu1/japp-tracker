@@ -1,6 +1,22 @@
 from flask_wtf import FlaskForm
-from wtforms import BooleanField, PasswordField, StringField, SubmitField
-from wtforms.validators import DataRequired, Email, EqualTo, Length, Regexp
+from wtforms import (
+    BooleanField,
+    IntegerField,
+    PasswordField,
+    StringField,
+    SubmitField,
+    TextAreaField,
+)
+from wtforms.validators import (
+    DataRequired,
+    Email,
+    EqualTo,
+    Length,
+    NumberRange,
+    Optional,
+    Regexp,
+    ValidationError,
+)
 
 
 class RegistrationForm(FlaskForm):
@@ -88,3 +104,42 @@ class ChangePasswordForm(FlaskForm):
         ],
     )
     submit = SubmitField("Save")
+
+
+class JobApplicationForm(FlaskForm):
+    name = StringField(
+        "Position",
+        validators=[DataRequired(), Length(max=120)],
+    )
+    company = StringField(
+        "Company",
+        validators=[DataRequired(), Length(max=120)],
+    )
+    description = TextAreaField(
+        "Description",
+        validators=[Optional()],
+    )
+    salary_min = IntegerField(
+        "Minimum salary",
+        validators=[Optional(), NumberRange(min=0)],
+    )
+    salary_max = IntegerField(
+        "Maximum salary",
+        validators=[Optional(), NumberRange(min=0)],
+    )
+    stage = StringField(
+        "Stage",
+        validators=[DataRequired(), Length(max=120)],
+        default="0. Draft",
+    )
+    submit = SubmitField("Add application")
+
+    def validate_salary_max(self, field):
+        if (
+            self.salary_min.data is not None
+            and field.data is not None
+            and field.data < self.salary_min.data
+        ):
+            raise ValidationError(
+                "Maximum salary must be greater than or equal to the minimum salary."
+            )
