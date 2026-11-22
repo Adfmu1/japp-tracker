@@ -13,6 +13,7 @@ from flask import (
 from flask_login import current_user, login_required, login_user, logout_user
 from sqlalchemy.exc import IntegrityError
 
+from ..extensions import limiter, login_rate_limit_key
 from ..forms import LoginForm, RegistrationForm
 from ..models import User, db, verify_dummy_password
 
@@ -38,6 +39,8 @@ def _safe_next(target: str) -> str | None:
 
 
 @bp.route("/login", methods=["GET", "POST"])
+@limiter.limit("10 per minute", methods=["POST"])
+@limiter.limit("5 per minute", key_func=login_rate_limit_key, methods=["POST"])
 def login() -> str | Response:
     if current_user.is_authenticated:
         return redirect(url_for("main.index"))
@@ -79,6 +82,7 @@ def logout() -> Response:
 
 
 @bp.route("/register", methods=["GET", "POST"])
+@limiter.limit("3 per hour", methods=["POST"])
 def register() -> str | Response:
     if current_user.is_authenticated:
         return redirect(url_for("main.index"))

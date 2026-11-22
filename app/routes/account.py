@@ -14,6 +14,7 @@ from flask_login import current_user, login_required
 from flask_wtf import FlaskForm
 from sqlalchemy.exc import IntegrityError
 
+from ..extensions import limiter, user_rate_limit_key
 from ..forms import ChangeEmailForm, ChangePasswordForm, ChangeUsernameForm
 from ..models import db
 
@@ -45,6 +46,7 @@ def index() -> str:
 
 @bp.route("/account/edit/<field>", methods=["GET", "POST"])
 @login_required
+@limiter.limit("10 per minute", key_func=user_rate_limit_key, methods=["POST"])
 def edit(field: str) -> str | Response:
     config = FIELDS.get(field)
     if config is None:

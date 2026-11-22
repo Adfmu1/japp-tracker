@@ -24,6 +24,12 @@ class Config:
     MAX_CONTENT_LENGTH = 1024 * 1024
     SQLALCHEMY_ENGINE_OPTIONS: ClassVar[dict[str, bool]] = {"pool_pre_ping": True}
 
+    # Rate limiting. The in-memory store is fine for a single dev process;
+    # production should point RATELIMIT_STORAGE_URI at a shared backend such
+    # as redis://host:6379 so limits survive restarts and span workers.
+    RATELIMIT_STORAGE_URI = os.environ.get("RATELIMIT_STORAGE_URI", "memory://")
+    RATELIMIT_HEADERS_ENABLED = True
+
     if len(SECRET_KEY) < 32:
         raise RuntimeError("SECRET_KEY must be at least 32 characters long")
 
