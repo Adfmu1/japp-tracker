@@ -112,6 +112,14 @@ class ChangePasswordForm(FlaskForm):
     submit = SubmitField("Save")
 
 
+class DeleteAccountForm(FlaskForm):
+    password = PasswordField(
+        "Current password",
+        validators=[DataRequired()],
+    )
+    submit = SubmitField("Delete account")
+
+
 class JobApplicationForm(FlaskForm):
     name = StringField(
         "Position",

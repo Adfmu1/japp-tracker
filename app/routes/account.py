@@ -10,13 +10,18 @@ from flask import (
     render_template,
     url_for,
 )
-from flask_login import current_user, login_required
+from flask_login import current_user, login_required, logout_user
 from flask_wtf import FlaskForm
 from sqlalchemy.exc import IntegrityError
 
 from ..extensions import limiter, user_rate_limit_key
-from ..forms import ChangeEmailForm, ChangePasswordForm, ChangeUsernameForm
-from ..models import db
+from ..forms import (
+    ChangeEmailForm,
+    ChangePasswordForm,
+    ChangeUsernameForm,
+    DeleteAccountForm,
+)
+from ..models import JobApplication, db
 
 bp = Blueprint("account", __name__)
 
@@ -41,7 +46,41 @@ def _render_edit(field: str, heading: str, form: FlaskForm) -> str:
 @bp.get("/account")
 @login_required
 def index() -> str:
-    return render_template("account.html")
+    return render_template("account.html", delete_form=DeleteAccountForm())
+
+
+@bp.post("/account/delete")
+@login_required
+@limiter.limit("5 per minute", key_func=user_rate_limit_key, methods=["POST"])
+def delete() -> Response:
+    form = DeleteAccountForm()
+    if not form.validate_on_submit():
+        flash("Current password is required.", "error")
+        return redirect(url_for("account.index"))
+
+    if not current_user.check_password(form.password.data):
+        flash("Incorrect password.", "error")
+        return redirect(url_for("account.index"))
+
+    user = current_user._get_current_object()
+    try:
+        db.session.execute(
+            db.delete(JobApplication).where(JobApplication.user_id == user.id)
+        )
+        db.session.delete(user)
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        current_app.logger.warning(
+            "Failed to delete account",
+            exc_info=True,
+        )
+        flash("Could not delete your account. Please try again.", "error")
+        return redirect(url_for("account.index"))
+
+    logout_user()
+    flash("Account deleted.", "success")
+    return redirect(url_for("main.index"))
 
 
 @bp.route("/account/edit/<field>", methods=["GET", "POST"])
