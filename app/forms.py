@@ -149,3 +149,7 @@ class JobApplicationForm(FlaskForm):
             raise ValidationError(
                 "Maximum salary must be greater than or equal to the minimum salary."
             )
+
+
+class DeleteApplicationForm(FlaskForm):
+    pass
