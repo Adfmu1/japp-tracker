@@ -5,7 +5,7 @@ from flask_login import LoginManager
 from flask_migrate import Migrate
 from flask_wtf import CSRFProtect
 
-from .config import Config
+from .config import Config, get_config
 from .models import User, db
 from .routes.account import bp as account_bp
 from .routes.applications import bp as applications_bp
@@ -17,16 +17,16 @@ csrf = CSRFProtect()
 
 
 @login_manager.user_loader
-def load_user(user_id: str):
+def load_user(user_id: str) -> User | None:
     try:
         return db.session.get(User, uuid.UUID(user_id))
     except (ValueError, TypeError):
         return None
 
 
-def create_app():
+def create_app(config_object: type[Config] | None = None) -> Flask:
     app = Flask(__name__)
-    app.config.from_object(Config)
+    app.config.from_object(config_object or get_config())
 
     db.init_app(app)
     Migrate(app, db)

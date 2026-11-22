@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 
 from argon2 import PasswordHasher
-from argon2.exceptions import VerifyMismatchError
+from argon2.exceptions import Argon2Error
 from flask_login import UserMixin
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import (
@@ -22,6 +22,17 @@ db = SQLAlchemy()
 
 password_hasher = PasswordHasher()
 
+# Verified when a login names an unknown user so that the response time does not
+# reveal whether the username exists.
+_DUMMY_HASH = password_hasher.hash("timing-equalizer")
+
+
+def verify_dummy_password(password: str) -> None:
+    try:
+        password_hasher.verify(_DUMMY_HASH, password)
+    except (Argon2Error, ValueError):
+        pass
+
 
 class User(UserMixin, db.Model):
     __tablename__ = "users"
@@ -29,6 +40,7 @@ class User(UserMixin, db.Model):
     id: Mapped[uuid.UUID] = mapped_column(
         Uuid,
         primary_key=True,
+        default=uuid.uuid4,
         server_default=text("gen_random_uuid()"),
     )
     username: Mapped[str] = mapped_column(String(40), unique=True, nullable=False)
@@ -38,6 +50,7 @@ class User(UserMixin, db.Model):
     job_applications: Mapped[list["JobApplication"]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",
+        passive_deletes=True,
     )
 
     def set_password(self, password: str) -> None:
@@ -46,8 +59,13 @@ class User(UserMixin, db.Model):
     def check_password(self, password: str) -> bool:
         try:
             password_hasher.verify(self.password_hash, password)
-        except VerifyMismatchError:
+        except (Argon2Error, ValueError):
+            # Argon2Error covers VerifyMismatchError; InvalidHashError is a
+            # ValueError. Either way a bad hash rejects the login instead of
+            # raising a 500.
             return False
+        if password_hasher.check_needs_rehash(self.password_hash):
+            self.password_hash = password_hasher.hash(password)
         return True
 
 

@@ -1,25 +1,44 @@
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import unquote, urljoin, urlsplit
 
-from flask import Blueprint, flash, redirect, render_template, request, url_for
+from flask import (
+    Blueprint,
+    Response,
+    current_app,
+    flash,
+    redirect,
+    render_template,
+    request,
+    url_for,
+)
 from flask_login import current_user, login_required, login_user, logout_user
 from sqlalchemy.exc import IntegrityError
 
 from ..forms import LoginForm, RegistrationForm
-from ..models import User, db
+from ..models import User, db, verify_dummy_password
 
 bp = Blueprint("auth", __name__)
 
 
-def _is_safe_next(target: str) -> bool:
-    if not target.startswith("/") or target.startswith("//") or "\\" in target:
-        return False
+def _safe_next(target: str) -> str | None:
+    """Return a same-origin URL for target, or None when it is unsafe.
+
+    The decoded value is validated and the normalized URL is returned, so the
+    redirect cannot use a different value than the one that was checked.
+    """
+    if not target.startswith("/") or target.startswith("//"):
+        return None
+    decoded = unquote(target)
+    if "\\" in decoded or any(ord(char) < 0x20 for char in decoded):
+        return None
     host = urlsplit(request.host_url)
     candidate = urlsplit(urljoin(request.host_url, target))
-    return candidate.scheme in {"http", "https"} and candidate.netloc == host.netloc
+    if candidate.scheme not in {"http", "https"} or candidate.netloc != host.netloc:
+        return None
+    return candidate.geturl()
 
 
 @bp.route("/login", methods=["GET", "POST"])
-def login():
+def login() -> str | Response:
     if current_user.is_authenticated:
         return redirect(url_for("main.index"))
 
@@ -29,30 +48,38 @@ def login():
             db.select(User).filter_by(username=form.username.data.strip())
         ).scalar_one_or_none()
 
-        if user is None or not user.check_password(form.password.data):
+        if user is None:
+            # Spend the same time as a real verification to avoid revealing
+            # which usernames exist.
+            verify_dummy_password(form.password.data)
+            flash("Invalid username or password.", "error")
+            return render_template("login.html", form=form)
+
+        if not user.check_password(form.password.data):
             flash("Invalid username or password.", "error")
             return render_template("login.html", form=form)
 
         login_user(user, remember=form.remember.data)
+        if db.session.is_modified(user):
+            # Persist a password rehash performed by check_password().
+            db.session.commit()
         flash("Logged in successfully.", "success")
-        next_url = request.args.get("next")
-        if next_url and _is_safe_next(next_url):
-            return redirect(next_url)
-        return redirect(url_for("applications.index"))
+        next_url = _safe_next(request.args.get("next", ""))
+        return redirect(next_url or url_for("applications.index"))
 
     return render_template("login.html", form=form)
 
 
-@bp.get("/logout")
+@bp.post("/logout")
 @login_required
-def logout():
+def logout() -> Response:
     logout_user()
     flash("Logged out.", "success")
     return redirect(url_for("main.index"))
 
 
 @bp.route("/register", methods=["GET", "POST"])
-def register():
+def register() -> str | Response:
     if current_user.is_authenticated:
         return redirect(url_for("main.index"))
 
@@ -77,6 +104,11 @@ def register():
                 db.session.commit()
             except IntegrityError:
                 db.session.rollback()
+                current_app.logger.warning(
+                    "Registration conflict for username %r",
+                    username,
+                    exc_info=True,
+                )
                 flash("Username or email already in use.", "error")
             else:
                 flash("Registration successful. Please log in.", "success")
