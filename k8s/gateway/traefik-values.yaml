@@ -1,0 +1,52 @@
+deployment:
+  kind: Deployment
+  replicas: 1
+
+providers:
+  kubernetesGateway:
+    enabled: true
+    gatewayClass: traefik
+  kubernetesIngress:
+    enabled: false
+  kubernetesCRD:
+    enabled: false
+
+gateway:
+  enabled: true
+  name: japp-gateway
+  namespace: japp
+  listeners:
+    websecure:
+      port: 8443
+      protocol: HTTPS
+      certificateRefs:
+        - name: japp-ip-tls
+          kind: Secret
+      namespacePolicy:
+        from: Same
+
+ports:
+  traefik:
+    expose:
+      default: false
+  web:
+    expose:
+      default: false
+  websecure:
+    hostPort: 443
+    expose:
+      default: false
+
+service:
+  enabled: false
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 96Mi
+  limits:
+    cpu: 300m
+    memory: 256Mi
+
+log:
+  level: INFO
