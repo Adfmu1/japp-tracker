@@ -36,6 +36,26 @@ def create_app(config_object: type[Config] | None = None) -> Flask:
     login_manager.init_app(app)
     login_manager.login_view = "auth.login"
 
+    @app.after_request
+    def add_security_headers(response):
+        response.headers.update(
+            {
+                "Content-Security-Policy": (
+                    "default-src 'self'; base-uri 'self'; object-src 'none'; "
+                    "frame-ancestors 'none'; script-src 'self'; style-src 'self'; "
+                    "img-src 'self' data:; font-src 'self'; connect-src 'self'"
+                ),
+                "X-Content-Type-Options": "nosniff",
+                "Referrer-Policy": "strict-origin-when-cross-origin",
+                "X-Frame-Options": "DENY",
+            }
+        )
+        if app.config.get("SECURITY_HEADERS_HSTS", False):
+            response.headers["Strict-Transport-Security"] = (
+                "max-age=31536000; includeSubDomains"
+            )
+        return response
+
     @app.errorhandler(429)
     def ratelimit_handler(error: Exception) -> tuple[str, int]:
         # Log the endpoint and address only; never the submitted username or

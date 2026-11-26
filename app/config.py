@@ -29,6 +29,7 @@ class Config:
     # as redis://host:6379 so limits survive restarts and span workers.
     RATELIMIT_STORAGE_URI = os.environ.get("RATELIMIT_STORAGE_URI", "memory://")
     RATELIMIT_HEADERS_ENABLED = True
+    SECURITY_HEADERS_HSTS = False
 
     if len(SECRET_KEY) < 32:
         raise RuntimeError("SECRET_KEY must be at least 32 characters long")
@@ -39,6 +40,7 @@ class ProductionConfig(Config):
 
     SESSION_COOKIE_SECURE = True
     REMEMBER_COOKIE_SECURE = True
+    SECURITY_HEADERS_HSTS = True
 
 
 def get_config() -> type[Config]:
