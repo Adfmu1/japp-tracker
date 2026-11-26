@@ -31,6 +31,8 @@ jobs:
       AWS_ROLE_ARN: ${{ secrets.AWS_PRODUCTION_ROLE_ARN }}
       APP_SECRET_ID: ${{ vars.APP_SECRET_ID }}
       DB_SECRET_ID: ${{ vars.DB_SECRET_ID }}
+      JAPP_PUBLIC_URL: ${{ vars.JAPP_PUBLIC_URL }}
+      JAPP_EXPECTED_HOSTNAME: ${{ vars.JAPP_EXPECTED_HOSTNAME }}
       COSIGN_CERTIFICATE_IDENTITY: ${{ vars.COSIGN_CERTIFICATE_IDENTITY }}
       COSIGN_OIDC_ISSUER: https://token.actions.githubusercontent.com
     steps:
@@ -44,6 +46,8 @@ jobs:
           [[ "$RELEASE_COMMIT" =~ ^[a-f0-9]{40}$ ]]
           [[ -n "$AWS_SSM_INSTANCE_ID" && -n "$AWS_REGION" && -n "$AWS_ROLE_ARN" ]]
           [[ -n "$APP_SECRET_ID" && -n "$DB_SECRET_ID" ]]
+          [[ "$JAPP_PUBLIC_URL" =~ ^https://[^/@:]+(:[0-9]+)?(/.*)?$ ]]
+          [[ -n "$JAPP_EXPECTED_HOSTNAME" ]]
 
       - name: Configure AWS credentials with GitHub OIDC
         uses: aws-actions/configure-aws-credentials@v4
@@ -64,10 +68,14 @@ jobs:
             --arg db_secret "$DB_SECRET_ID" \
             --arg identity "$COSIGN_CERTIFICATE_IDENTITY" \
             --arg issuer "$COSIGN_OIDC_ISSUER" \
+            --arg public_url "$JAPP_PUBLIC_URL" \
+            --arg expected_hostname "$JAPP_EXPECTED_HOSTNAME" \
             --arg commit "$RELEASE_COMMIT" \
             '[
               ("export COSIGN_CERTIFICATE_IDENTITY=" + ($identity|@sh)),
               ("export COSIGN_OIDC_ISSUER=" + ($issuer|@sh)),
+              ("export JAPP_PUBLIC_URL=" + ($public_url|@sh)),
+              ("export JAPP_EXPECTED_HOSTNAME=" + ($expected_hostname|@sh)),
               ("export JAPP_RELEASE_COMMIT=" + ($commit|@sh)),
               ("/opt/japp/bin/ec2-deployment-executor.sh " +
                 ($image|@sh) + " " + ($app_secret|@sh) + " " + ($db_secret|@sh))
@@ -104,6 +112,7 @@ jobs:
                   echo "- image digest: \`$IMAGE_REF\`"
                   echo "- migration_result: \`$(printf '%s\n' "$output" | grep -o 'deployment_status=migration_[a-z_]*' | tail -n 1 || true)\`"
                   echo "- rollout_result: \`$(printf '%s\n' "$output" | grep -o 'deployment_status=rollout_[a-z_]*' | tail -n 1 || true)\`"
+                  echo "- acceptance_result: \`$(printf '%s\n' "$output" | grep -o 'deployment_status=\\(healthz\\|readyz\\|gateway\\|certificate\\|https_redirect\\)_[a-z_]*' | tail -n 1 || true)\`"
                 } >> "$GITHUB_STEP_SUMMARY"
                 exit 0
                 ;;
@@ -119,6 +128,7 @@ jobs:
                   echo "- image digest: \`$IMAGE_REF\`"
                   echo "- migration_result: \`$(printf '%s\n' "$output" | grep -o 'deployment_status=migration_[a-z_]*' | tail -n 1 || true)\`"
                   echo "- rollout_result: \`$(printf '%s\n' "$output" | grep -o 'deployment_status=rollout_[a-z_]*' | tail -n 1 || true)\`"
+                  echo "- acceptance_result: \`$(printf '%s\n' "$output" | grep -o 'deployment_status=acceptance_failed_[a-z_]*' | tail -n 1 || true)\`"
                 } >> "$GITHUB_STEP_SUMMARY"
                 printf 'deployment_status=failed image_ref=%s\n' "$IMAGE_REF"
                 exit 1

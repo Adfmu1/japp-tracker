@@ -49,6 +49,16 @@ def test_workflow_uses_oidc_ssm_and_protected_environment():
     assert "AWS_SSM_INSTANCE_ID" in text
 
 
+def test_workflow_passes_public_acceptance_contract_to_executor():
+    text = WORKFLOW.read_text()
+
+    assert "JAPP_PUBLIC_URL" in text
+    assert "JAPP_EXPECTED_HOSTNAME" in text
+    assert "acceptance_result" in text
+    assert "JAPP_PUBLIC_URL=" in text
+    assert "JAPP_EXPECTED_HOSTNAME=" in text
+
+
 def test_workflow_does_not_contain_live_ids_or_secrets():
     text = WORKFLOW.read_text()
 
@@ -93,6 +103,45 @@ def test_executor_migration_failure_precedes_any_application_change():
     assert migration < application_apply
     assert "migration_failed" in text
     assert "rollout_succeeded" in text
+
+
+def test_executor_requires_complete_production_acceptance_contract():
+    text = EXECUTOR.read_text()
+
+    assert "rollout_succeeded" in text
+    assert "healthz_succeeded" in text
+    assert "readyz_succeeded" in text
+    assert "gateway_succeeded" in text
+    assert "certificate_succeeded" in text
+    assert "https_redirect_succeeded" in text
+    assert "JAPP_EXPECTED_HOSTNAME" in text
+    assert 'kubectl -n "$NAMESPACE" get gateway' in text
+    assert 'kubectl -n "$NAMESPACE" get httproute' in text
+    assert "curl --fail" in text
+    assert "--location" in text
+    assert "--max-redirs" in text
+
+
+def test_executor_rolls_back_every_acceptance_failure_without_migration_rollback():
+    text = EXECUTOR.read_text()
+
+    acceptance_start = text.index("rollback_application()")
+    acceptance = text[acceptance_start:]
+
+    assert 'set image deployment/"' in acceptance
+    assert "previous_image" in acceptance
+    assert 'kubectl -n "$NAMESPACE" delete job' not in acceptance
+    assert "migration_succeeded" in text
+    assert 'fail "$CLUSTER_FAILURE" "acceptance_failed_rolled_back"' in text
+
+
+def test_executor_does_not_disable_tls_verification_or_print_diagnostics():
+    text = EXECUTOR.read_text()
+
+    assert "--insecure" not in text
+    assert " -k" not in text
+    assert "curl --verbose" not in text
+    assert "kubectl describe" not in text
 
 
 def test_executor_redacts_secret_manager_failure_with_mocked_commands(tmp_path):

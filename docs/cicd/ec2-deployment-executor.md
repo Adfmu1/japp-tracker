@@ -32,11 +32,19 @@ workflow output. Temporary files are removed on exit.
 The executor applies the migration Job and waits for completion before applying
 the application Deployment. A migration failure emits `migration_failed` and
 exits before applying the Deployment. It records the previous digest, requires
-rollout success (including the Deployment readiness probe), and optionally
-checks `${JAPP_PUBLIC_URL}/healthz`. A failed rollout or smoke check restores
-the previous application digest. Database migrations are not automatically
-reversed. Status output includes the release commit and digest, plus migration
-and rollout results.
+rollout success (including the Deployment readiness probe), then verifies the
+public HTTPS contract: `/healthz`, database-backed `/readyz`, Gateway `Accepted`
+and `Programmed`, both HTTPRoutes `Accepted` and `ResolvedRefs`, the expected
+hostname, normal certificate validation, and an HTTP redirect to HTTPS.
+
+`JAPP_PUBLIC_URL` must be an `https://` URL and
+`JAPP_EXPECTED_HOSTNAME` must exactly match its hostname. Curl runs without
+certificate-warning bypasses and follows only bounded HTTPS redirects. A failed
+rollout or acceptance check restores the previous application digest. Database
+migrations are not automatically reversed; a successful migration remains in
+place during application rollback. Status output includes the release commit and
+digest, plus migration, rollout, and acceptance results. Diagnostics are
+status-only and never include command output or secret values.
 
 Migration revisions must follow expand/contract compatibility: add or widen
 schema elements before the application depends on them, keep the previous
@@ -51,7 +59,7 @@ later release.
 | 10 | Image reference or signature authentication failed |
 | 20 | Secrets Manager retrieval or Kubernetes Secret synchronization failed |
 | 30 | Required manifests could not be read or rendered |
-| 40 | Migration, rollout, or smoke-check cluster operation failed |
+| 40 | Migration, rollout, acceptance, or rollback cluster operation failed |
 | 64 | Invalid executor invocation |
 
 The GitHub Actions workflow uses a protected `production` environment,
