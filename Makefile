@@ -7,7 +7,7 @@ KUBECTL ?= kubectl
 NAMESPACE ?= japp
 IMAGE ?= docker.io/adfmu/japp:v1
 
-.PHONY: run venv install lint format fix deploy-local deploy-rds configure-ip-tls configure-domain-tls deploy-gateway-rds
+.PHONY: run venv install lint format fix deploy-local deploy-rds deploy-gateway-rds
 
 run:
 	$(FLASK) run --port 5095
@@ -73,12 +73,6 @@ deploy-rds:
 	fi; \
 	$(KUBECTL) -n $(NAMESPACE) scale statefulset/postgres --replicas=0; \
 	$(KUBECTL) -n $(NAMESPACE) rollout status deployment/japp-app --timeout=180s
-
-configure-ip-tls:
-	KUBECTL="$(KUBECTL)" NAMESPACE="$(NAMESPACE)" scripts/configure-ip-tls.sh
-
-configure-domain-tls:
-	KUBECTL="$(KUBECTL)" NAMESPACE="$(NAMESPACE)" scripts/configure-domain-tls.sh
 
 deploy-gateway-rds:
 	@set -Eeuo pipefail; \

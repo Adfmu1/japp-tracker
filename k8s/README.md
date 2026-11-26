@@ -64,19 +64,13 @@ before scaling the in-cluster PostgreSQL StatefulSet to zero. Its PVC is
 preserved; scaling back to one replica remains possible. Ensure the RDS
 security group permits inbound PostgreSQL from the EC2 security group.
 
-## Public HTTPS with Gateway API (temporary IP certificate)
+## Public HTTPS with Gateway API
 
 The optional `gateway` setup installs one Traefik replica and uses Kubernetes
 Gateway API to route HTTPS to the existing private `japp-app` ClusterIP
-Service. Traefik binds host port 443 on the cluster node; no public HTTP
-listener is configured. The self-signed certificate is generated locally and
-uploaded as a Kubernetes Secret, not stored in this repository.
-
-This temporary certificate covers the EC2 public IPv4 address
-`18.199.177.12`, expires after one year, and is not trusted by browsers. Users
-will see a warning unless they explicitly trust the certificate. Do not enter
-credentials unless you understand and accept that warning. Replace it with a
-trusted domain certificate after configuring DNS.
+Service. Traefik binds host ports 80 and 443 on the cluster node. The trusted
+domain certificate is provisioned outside this repository and uploaded as the
+`japp-duckdns-tls` Kubernetes Secret.
 
 Install the Gateway API Standard CRDs and Traefik (the chart version is pinned):
 
@@ -90,38 +84,42 @@ helm upgrade --install traefik traefik/traefik \
   --values k8s/gateway/traefik-values.yaml
 ```
 
-Then create the certificate and route:
+Then provision the domain certificate on the host with Certbot and create the
+Secret. Keep the private key outside this repository:
 
 ```sh
-make configure-ip-tls KUBECTL='sudo k0s kubectl'
+sudo certbot certonly --standalone --non-interactive \
+  --agree-tos --register-unsafely-without-email \
+  --domain japp-tracker.duckdns.org
+sudo k0s kubectl -n japp create secret tls japp-duckdns-tls \
+  --cert=/etc/letsencrypt/live/japp-tracker.duckdns.org/fullchain.pem \
+  --key=/etc/letsencrypt/live/japp-tracker.duckdns.org/privkey.pem \
+  --dry-run=client -o yaml | sudo k0s kubectl apply -f -
 make deploy-gateway-rds KUBECTL='sudo k0s kubectl'
 ```
 
 After confirming the correct security group and authorization, permit inbound
-TCP/443 from `0.0.0.0/0` and keep port 80 closed. This is an intentionally
-public IPv4 endpoint.
+TCP/80 and TCP/443 from `0.0.0.0/0`. Port 80 only redirects to HTTPS and is
+also required for the standalone Certbot HTTP-01 renewal challenge.
 Verify the Gateway and route become accepted/programmed, then test with:
 
 ```sh
-curl -kI https://18.199.177.12/
+curl -I https://japp-tracker.duckdns.org/
 ```
 
-`-k` is needed only because the temporary certificate is self-signed. The app
-deployment sets `APP_ENV=production`, so session and remember cookies use the
-Secure attribute. Gateway resources and the controller are separate from the
-RDS application overlay; do not uninstall the controller while the public
-route is in use.
+The app deployment sets `APP_ENV=production`, so session and remember cookies
+use the Secure attribute. Gateway resources and the controller are separate
+from the RDS application overlay; do not uninstall the controller while the
+public route is in use.
 
-### Retire the temporary IP endpoint
+### Retire the public endpoint
 
-Keep the IP endpoint only until the future domain endpoint resolves, passes
-normal certificate validation without `-k`, and returns the expected
-application response. After all three checks pass, have an authorized operator
-remove inbound TCP/443 for this EC2 instance from the correct security group.
-Do not make that AWS firewall change as part of applying Kubernetes manifests.
-The temporary endpoint is public to all IPv4 sources while enabled; the
-self-signed certificate is not an access-control mechanism, and real
-credentials must not be entered through a certificate-warning bypass.
+Keep the endpoint public only while the application requires it. Before
+retiring it, verify that the intended replacement endpoint resolves, passes
+normal certificate validation, and returns the expected application response.
+Then have an authorized operator remove inbound TCP/80 and TCP/443 for this
+EC2 instance from the correct security group. Do not make that AWS firewall
+change as part of applying Kubernetes manifests.
 
 `/healthz` is sufficient to verify that traffic reaches Flask, but it does not
 check RDS connectivity or migration health.
