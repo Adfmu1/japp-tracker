@@ -1,0 +1,131 @@
+name: Release artifacts
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+      - Security gates
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+  packages: write
+  attestations: write
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+
+jobs:
+  release:
+    name: Build, sign, and attest release image
+    if: >-
+      (github.event.workflow_run.name == 'CI' ||
+      github.event.workflow_run.name == 'Security gates') &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+      image: ${{ steps.image.outputs.image }}
+    steps:
+      - name: Wait for both required gates
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -Eeuo pipefail
+          for workflow in ci.yml security-gates.yml; do
+            conclusion=""
+            for attempt in $(seq 1 60); do
+              conclusion="$(
+                gh run list \
+                  --workflow "$workflow" \
+                  --commit "$RELEASE_SHA" \
+                  --limit 1 \
+                  --json status,conclusion \
+                  --jq '.[] | select(.status == "completed") | .conclusion' \
+                  | head -n 1
+              )"
+              if [ "$conclusion" = "success" ]; then
+                break
+              fi
+              if [ "$conclusion" != "" ] && [ "$conclusion" != "success" ]; then
+                echo "$workflow failed for $RELEASE_SHA: $conclusion" >&2
+                exit 1
+              fi
+              sleep 10
+            done
+            if [ "$conclusion" != "success" ]; then
+              echo "$workflow did not pass for $RELEASE_SHA" >&2
+              exit 1
+            fi
+          done
+
+      - name: Check out the gated commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Configure AWS credentials with GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ vars.AWS_RELEASE_ROLE_ARN }}
+
+      - name: Log in to private ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push the release image once
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.event.workflow_run.head_sha }}
+
+      - name: Record digest-qualified image identity
+        id: image
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -Eeuo pipefail
+          test -n "$DIGEST"
+          case "$DIGEST" in sha256:*) ;; *) echo "Build did not return a sha256 digest" >&2; exit 1 ;; esac
+          IMAGE="${REGISTRY}/${ECR_REPOSITORY}@${DIGEST}"
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+          {
+            echo "commit=${RELEASE_SHA}"
+            echo "image=${IMAGE}"
+            echo "digest=${DIGEST}"
+            echo "verification=CD must verify the signature and digest before deployment"
+          } | tee image-digest.txt
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3.7.0
+
+      - name: Sign image with keyless Cosign and GitHub OIDC
+        env:
+          IMAGE: ${{ steps.image.outputs.image }}
+        run: cosign sign --yes "$IMAGE"
+
+      - name: Publish SLSA provenance to the registry
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+      - name: Publish release metadata for CD
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-metadata
+          path: image-digest.txt
+          if-no-files-found: error

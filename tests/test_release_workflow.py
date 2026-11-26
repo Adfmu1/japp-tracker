@@ -26,7 +26,7 @@ def test_release_builds_and_pushes_one_sha_tagged_ecr_image():
     assert "docker/build-push-action@" in workflow
     assert "push: true" in workflow
     assert "tags: |" in workflow
-    assert "${{ github.sha }}" in workflow
+    assert "github.event.workflow_run.head_sha" in workflow
     assert "aws-actions/configure-aws-credentials@" in workflow
     assert "aws-actions/amazon-ecr-login@" in workflow
     assert "environment:" not in workflow
@@ -35,13 +35,12 @@ def test_release_builds_and_pushes_one_sha_tagged_ecr_image():
 def test_release_records_digest_and_hands_off_only_digest_identity():
     workflow = read_workflow()
 
-    assert "outputs: digest" in workflow
     assert "digest: ${{ steps.build.outputs.digest }}" in workflow
     assert "image-digest.txt" in workflow
     assert "sha256:" in workflow
     assert "needs.release.outputs.digest" in workflow or "steps.build.outputs.digest" in workflow
     assert "docker tag" not in workflow
-    assert "latest" not in workflow
+    assert ":latest" not in workflow
 
 
 def test_release_uses_keyless_cosign_and_attaches_provenance():
@@ -62,5 +61,5 @@ def test_release_publishes_machine_readable_artifact_metadata_for_cd():
     assert "release-metadata" in workflow
     assert "image=${IMAGE}" in workflow
     assert "digest=${DIGEST}" in workflow
-    assert "commit=${GITHUB_SHA}" in workflow
+    assert "commit=${RELEASE_SHA}" in workflow
     assert "verify the signature" in workflow.lower()
