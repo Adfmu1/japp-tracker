@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 WORKFLOW = Path(__file__).parents[1] / ".github" / "workflows" / "ci.yml"
 
 
@@ -21,5 +20,6 @@ def test_ci_workflow_provides_postgresql_without_exposing_credentials():
     assert "postgres:16" in workflow
     assert "POSTGRES_PASSWORD: postgres" in workflow
     assert "TEST_DATABASE_URL: postgresql+psycopg2://postgres:postgres@" in workflow
+    assert "DB_URL: postgresql+psycopg2://postgres:postgres@" in workflow
     assert "SECRET_KEY:" in workflow
     assert "secrets." not in workflow
