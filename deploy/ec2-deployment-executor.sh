@@ -15,6 +15,8 @@ readonly APP_SECRET_NAME="${JAPP_APP_SECRET_NAME:-app-secrets}"
 readonly DB_SECRET_NAME="${JAPP_DB_SECRET_NAME:-db-secrets}"
 readonly MANIFEST_DIR="${JAPP_MANIFEST_DIR:-/opt/japp/k8s}"
 readonly DEPLOYMENT_LOCK_FILE="${JAPP_DEPLOYMENT_LOCK_FILE:-/var/lock/japp-production-deployment.lock}"
+readonly PUBLIC_URL="${JAPP_PUBLIC_URL:-}"
+readonly EXPECTED_HOSTNAME="${JAPP_EXPECTED_HOSTNAME:-}"
 
 status() {
   printf 'deployment_status=%s release_commit=%s release_digest=%s\n' \
@@ -129,27 +131,101 @@ if ! kubectl -n "$NAMESPACE" apply -f "$rendered_migration" >/dev/null 2>&1 ||
 fi
 status "migration_succeeded"
 
+rollback_application() {
+  if ! kubectl -n "$NAMESPACE" set image deployment/"$DEPLOYMENT" \
+    "app=$previous_image" >/dev/null 2>&1; then
+    return 1
+  fi
+
+  kubectl -n "$NAMESPACE" rollout status deployment/"$DEPLOYMENT" \
+    --timeout="${JAPP_ROLLOUT_TIMEOUT:-300s}" >/dev/null 2>&1
+}
+
+acceptance_failure() {
+  local failed_check="$1"
+  status "acceptance_failed_${failed_check}"
+  if rollback_application; then
+    fail "$CLUSTER_FAILURE" "acceptance_failed_rolled_back"
+  fi
+  fail "$CLUSTER_FAILURE" "acceptance_failed_rollback_failed"
+}
+
 if ! kubectl -n "$NAMESPACE" apply -f "$rendered_app" >/dev/null 2>&1 ||
   ! kubectl -n "$NAMESPACE" rollout status deployment/"$DEPLOYMENT" \
     --timeout="${JAPP_ROLLOUT_TIMEOUT:-300s}" >/dev/null 2>&1; then
   status "rollout_failed"
-  kubectl -n "$NAMESPACE" set image deployment/"$DEPLOYMENT" \
-    "app=$previous_image" >/dev/null 2>&1 || true
-  kubectl -n "$NAMESPACE" rollout status deployment/"$DEPLOYMENT" \
-    --timeout="${JAPP_ROLLOUT_TIMEOUT:-300s}" >/dev/null 2>&1 || true
-  fail "$CLUSTER_FAILURE" "cluster_failure_rolled_back"
+  if rollback_application; then
+    fail "$CLUSTER_FAILURE" "cluster_failure_rolled_back"
+  fi
+  fail "$CLUSTER_FAILURE" "cluster_failure_rollback_failed"
 fi
 status "rollout_succeeded"
 
-if [[ -n "${JAPP_PUBLIC_URL:-}" ]] &&
-  ! curl --fail --silent --show-error --max-time "${JAPP_SMOKE_TIMEOUT:-15}" \
-    "$JAPP_PUBLIC_URL/healthz" >/dev/null 2>&1; then
-  status "rollout_failed"
-  kubectl -n "$NAMESPACE" set image deployment/"$DEPLOYMENT" \
-    "app=$previous_image" >/dev/null 2>&1 || true
-  kubectl -n "$NAMESPACE" rollout status deployment/"$DEPLOYMENT" \
-    --timeout="${JAPP_ROLLOUT_TIMEOUT:-300s}" >/dev/null 2>&1 || true
-  fail "$CLUSTER_FAILURE" "cluster_failure_rolled_back"
+if [[ -z "$PUBLIC_URL" || -z "$EXPECTED_HOSTNAME" ]] ||
+  [[ ! "$PUBLIC_URL" =~ ^https://[^/@:]+(:[0-9]+)?(/.*)?$ ]]; then
+  acceptance_failure "configuration"
 fi
+public_hostname="${PUBLIC_URL#https://}"
+public_hostname="${public_hostname%%/*}"
+public_hostname="${public_hostname%%:*}"
+if [[ "$public_hostname" != "$EXPECTED_HOSTNAME" ]]; then
+  acceptance_failure "hostname"
+fi
+
+response_file="$(mktemp)"
+response_headers="$(mktemp)"
+trap 'rm -f "$app_secret_file" "$db_secret_file" "$app_env_file" "$db_env_file" "$rendered_migration" "$rendered_app" "$response_file" "$response_headers"' EXIT
+chmod 600 "$response_file" "$response_headers"
+
+if ! curl --fail --silent --show-error --location --max-redirs 3 \
+  --proto '=https' --tlsv1.2 --max-time "${JAPP_SMOKE_TIMEOUT:-15}" \
+  "$PUBLIC_URL/healthz" -o "$response_file" >/dev/null 2>&1 ||
+  [[ "$(cat "$response_file" 2>/dev/null)" != "200 OK" ]]; then
+  acceptance_failure "healthz"
+fi
+status "healthz_succeeded"
+
+if ! curl --fail --silent --show-error --location --max-redirs 3 \
+  --proto '=https' --tlsv1.2 --max-time "${JAPP_SMOKE_TIMEOUT:-15}" \
+  "$PUBLIC_URL/readyz" -o "$response_file" >/dev/null 2>&1 ||
+  [[ "$(cat "$response_file" 2>/dev/null)" != "ready" ]]; then
+  acceptance_failure "readyz"
+fi
+status "readyz_succeeded"
+
+gateway_conditions="$(kubectl -n "$NAMESPACE" get gateway japp-gateway \
+  -o jsonpath='{range .status.conditions[*]}{.type}={.status}{"\n"}{end}' 2>/dev/null)" || \
+  acceptance_failure "gateway"
+if ! grep -qx 'Accepted=True' <<<"$gateway_conditions" ||
+  ! grep -qx 'Programmed=True' <<<"$gateway_conditions"; then
+  acceptance_failure "gateway"
+fi
+
+for route in japp japp-http-redirect; do
+  route_conditions="$(kubectl -n "$NAMESPACE" get httproute "$route" \
+    -o jsonpath='{range .status.parents[*].conditions[*]}{.type}={.status}{"\n"}{end}' 2>/dev/null)" || \
+    acceptance_failure "route"
+  if ! grep -qx 'Accepted=True' <<<"$route_conditions" ||
+    ! grep -qx 'ResolvedRefs=True' <<<"$route_conditions"; then
+    acceptance_failure "route"
+  fi
+done
+status "gateway_succeeded"
+
+if ! curl --fail --silent --show-error --max-time "${JAPP_SMOKE_TIMEOUT:-15}" \
+  --proto '=https' --tlsv1.2 "$PUBLIC_URL/" -o /dev/null >/dev/null 2>&1; then
+  acceptance_failure "certificate"
+fi
+status "certificate_succeeded"
+
+http_status="$(curl --silent --show-error --max-time "${JAPP_SMOKE_TIMEOUT:-15}" \
+  --max-redirs 0 --dump-header "$response_headers" --output /dev/null \
+  --write-out '%{http_code}' "http://$EXPECTED_HOSTNAME/" 2>/dev/null)" || \
+  acceptance_failure "https_redirect"
+if [[ "$http_status" != "301" && "$http_status" != "302" && "$http_status" != "307" && "$http_status" != "308" ]] ||
+  ! grep -Eiq "^location: https://$EXPECTED_HOSTNAME(:443)?(/|$)" "$response_headers"; then
+  acceptance_failure "https_redirect"
+fi
+status "https_redirect_succeeded"
 
 status "deployment_succeeded"
