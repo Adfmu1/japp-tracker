@@ -1,22 +1,40 @@
-from flask import Blueprint, abort, flash, redirect, render_template, url_for
-from flask_login import current_user, login_required
+from typing import Final
+
+from flask import (
+    Blueprint,
+    Response,
+    abort,
+    current_app,
+    flash,
+    redirect,
+    render_template,
+    url_for,
+)
+from flask_login import current_user, login_required, logout_user
+from flask_wtf import FlaskForm
 from sqlalchemy.exc import IntegrityError
 
-from ..forms import ChangeEmailForm, ChangePasswordForm, ChangeUsernameForm
-from ..models import db
+from ..extensions import limiter, user_rate_limit_key
+from ..forms import (
+    ChangeEmailForm,
+    ChangePasswordForm,
+    ChangeUsernameForm,
+    DeleteAccountForm,
+)
+from ..models import JobApplication, db
 
 bp = Blueprint("account", __name__)
 
 # Maps the URL field to (form class, heading, editable attribute).
 # A None attribute marks the password form, which has no single value field.
-FIELDS = {
+FIELDS: Final[dict[str, tuple[type[FlaskForm], str, str | None]]] = {
     "username": (ChangeUsernameForm, "Change username", "username"),
     "email": (ChangeEmailForm, "Change email", "email"),
     "password": (ChangePasswordForm, "Change password", None),
 }
 
 
-def _render_edit(field: str, heading: str, form) -> str:
+def _render_edit(field: str, heading: str, form: FlaskForm) -> str:
     return render_template(
         "account_edit.html",
         form=form,
@@ -27,13 +45,48 @@ def _render_edit(field: str, heading: str, form) -> str:
 
 @bp.get("/account")
 @login_required
-def index():
-    return render_template("account.html")
+def index() -> str:
+    return render_template("account.html", delete_form=DeleteAccountForm())
+
+
+@bp.post("/account/delete")
+@login_required
+@limiter.limit("5 per minute", key_func=user_rate_limit_key, methods=["POST"])
+def delete() -> Response:
+    form = DeleteAccountForm()
+    if not form.validate_on_submit():
+        flash("Current password is required.", "error")
+        return redirect(url_for("account.index"))
+
+    if not current_user.check_password(form.password.data):
+        flash("Incorrect password.", "error")
+        return redirect(url_for("account.index"))
+
+    user = current_user._get_current_object()
+    try:
+        db.session.execute(
+            db.delete(JobApplication).where(JobApplication.user_id == user.id)
+        )
+        db.session.delete(user)
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        current_app.logger.warning(
+            "Failed to delete account",
+            exc_info=True,
+        )
+        flash("Could not delete your account. Please try again.", "error")
+        return redirect(url_for("account.index"))
+
+    logout_user()
+    flash("Account deleted.", "success")
+    return redirect(url_for("main.index"))
 
 
 @bp.route("/account/edit/<field>", methods=["GET", "POST"])
 @login_required
-def edit(field: str):
+@limiter.limit("10 per minute", key_func=user_rate_limit_key, methods=["POST"])
+def edit(field: str) -> str | Response:
     config = FIELDS.get(field)
     if config is None:
         abort(404)
@@ -75,7 +128,15 @@ def edit(field: str):
             db.session.commit()
         except IntegrityError:
             db.session.rollback()
-            flash(f"That {field} is already in use.", "error")
+            current_app.logger.warning(
+                "Account update conflict for field %r",
+                field,
+                exc_info=True,
+            )
+            if value_attr is None:
+                flash("Could not update your password. Please try again.", "error")
+            else:
+                flash(f"That {field} is already in use.", "error")
             return _render_edit(field, heading, form)
 
         flash(f"{field.capitalize()} updated.", "success")

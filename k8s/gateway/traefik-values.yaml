@@ -1,0 +1,57 @@
+deployment:
+  kind: Deployment
+  replicas: 1
+
+providers:
+  kubernetesGateway:
+    enabled: true
+  kubernetesIngress:
+    enabled: false
+  kubernetesCRD:
+    enabled: false
+
+gateway:
+  enabled: true
+  name: japp-gateway
+  namespace: japp
+  listeners:
+    web:
+      port: 8000
+      protocol: HTTP
+      namespacePolicy:
+        from: Same
+    websecure:
+      port: 8443
+      protocol: HTTPS
+      certificateRefs:
+        - name: japp-duckdns-tls
+          kind: Secret
+      namespacePolicy:
+        from: Same
+
+ports:
+  traefik:
+    expose:
+      default: false
+  web:
+    hostPort: 80
+    expose:
+      default: false
+  websecure:
+    hostPort: 443
+    expose:
+      default: false
+
+service:
+  enabled: false
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 96Mi
+  limits:
+    cpu: 300m
+    memory: 256Mi
+
+log:
+  level: INFO

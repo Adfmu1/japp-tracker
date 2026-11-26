@@ -6,5 +6,10 @@ __pycache__/
 .pytest_cache/
 
 .env
+k8s/secrets.yaml
+/scripts/configure-domain-tls.sh
+/scripts/configure-ip-tls.sh
+/scripts/configure-rds-secret.py
+.terraform/
 
 lib64

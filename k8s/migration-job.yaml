@@ -1,0 +1,76 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: japp-db-migrate
+  labels:
+    app.kubernetes.io/name: japp-db-migrate
+    app.kubernetes.io/part-of: japp
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 300
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: japp-db-migrate
+        app.kubernetes.io/part-of: japp
+    spec:
+      automountServiceAccountToken: false
+      restartPolicy: Never
+      initContainers:
+        - name: wait-for-postgres
+          image: postgres:16.6-alpine
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - secretRef:
+                name: app-secrets
+          volumeMounts:
+            - name: rds-ca
+              mountPath: /etc/rds-ca
+              readOnly: true
+          command:
+            - sh
+            - -c
+            - |
+              until pg_isready -h "$DB_HOST" -p "$DB_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB"; do
+                sleep 2
+              done
+      containers:
+        - name: migrate
+          image: __IMAGE__
+          imagePullPolicy: IfNotPresent
+          workingDir: /app
+          command:
+            - flask
+            - --app
+            - japp:app
+            - db
+            - upgrade
+          envFrom:
+            - secretRef:
+                name: app-secrets
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: rds-ca
+              mountPath: /etc/rds-ca
+              readOnly: true
+      securityContext:
+        runAsGroup: 999
+        runAsNonRoot: true
+        runAsUser: 999
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: rds-ca
+          configMap:
+            name: rds-ca
+            items:
+              - key: global-bundle.pem
+                path: global-bundle.pem

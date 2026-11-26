@@ -22,4 +22,20 @@
     <input id="account-password" type="text" value="*******" autocomplete="off" readonly>
     <a href="{{ url_for('account.edit', field='password') }}">Change</a>
   </div>
+
+  <section aria-labelledby="delete-account-heading">
+    <h3 id="delete-account-heading">Delete account</h3>
+    <p>This permanently deletes your account and all job applications.</p>
+    <form method="post" action="{{ url_for('account.delete') }}">
+      {{ delete_form.hidden_tag() }}
+      {{ delete_form.password.label }}
+      {{ delete_form.password(autocomplete="current-password") }}
+      {% for error in delete_form.password.errors %}
+        <p>{{ error }}</p>
+      {% endfor %}
+      {{ delete_form.submit(
+        onclick="return confirm('Permanently delete your account and all job applications?');"
+      ) }}
+    </form>
+  </section>
 {% endblock %}

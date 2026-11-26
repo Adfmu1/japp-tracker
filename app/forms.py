@@ -25,7 +25,10 @@ class RegistrationForm(FlaskForm):
         validators=[
             DataRequired(),
             Length(min=3, max=40),
-            Regexp(r"^\w+$", message="Only letters, numbers and underscores"),
+            Regexp(
+                r"^[A-Za-z0-9_]+\Z",
+                message="Only letters, numbers and underscores",
+            ),
         ],
     )
     email = StringField(
@@ -65,7 +68,10 @@ class ChangeUsernameForm(FlaskForm):
         validators=[
             DataRequired(),
             Length(min=3, max=40),
-            Regexp(r"^\w+$", message="Only letters, numbers and underscores"),
+            Regexp(
+                r"^[A-Za-z0-9_]+\Z",
+                message="Only letters, numbers and underscores",
+            ),
         ],
     )
     password = PasswordField(
@@ -106,6 +112,14 @@ class ChangePasswordForm(FlaskForm):
     submit = SubmitField("Save")
 
 
+class DeleteAccountForm(FlaskForm):
+    password = PasswordField(
+        "Current password",
+        validators=[DataRequired()],
+    )
+    submit = SubmitField("Delete account")
+
+
 class JobApplicationForm(FlaskForm):
     name = StringField(
         "Position",
@@ -134,7 +148,7 @@ class JobApplicationForm(FlaskForm):
     )
     submit = SubmitField("Add application")
 
-    def validate_salary_max(self, field):
+    def validate_salary_max(self, field: IntegerField) -> None:
         if (
             self.salary_min.data is not None
             and field.data is not None
@@ -143,3 +157,7 @@ class JobApplicationForm(FlaskForm):
             raise ValidationError(
                 "Maximum salary must be greater than or equal to the minimum salary."
             )
+
+
+class DeleteApplicationForm(FlaskForm):
+    pass

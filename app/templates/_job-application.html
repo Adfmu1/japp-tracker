@@ -14,14 +14,21 @@
   <p>Stage: {{ application.stage }}</p>
   <p>Created: {{ application.created_at.strftime("%Y-%m-%d %H:%M") }}</p>
   <p>Updated: {{ application.updated_at.strftime("%Y-%m-%d %H:%M") }}</p>
-
-  {# TODO: enable when edit_job_application route exists
-  <a href="{{ url_for('edit_job_application', id=application.id) }}">Edit</a>
-  #}
-
-  {# TODO: enable when delete_job_application route exists
-  <form method="post" action="{{ url_for('delete_job_application', id=application.id) }}">
-    <button type="submit">Delete</button>
+  <p>
+    <a href="{{ url_for('applications.edit', application_id=application.id) }}">
+      Edit
+    </a>
+  </p>
+  <form
+    method="post"
+    action="{{ url_for('applications.delete', application_id=application.id) }}"
+  >
+    {{ delete_form.hidden_tag() }}
+    <button
+      type="submit"
+      onclick="return confirm('Delete this application?');"
+    >
+      Delete
+    </button>
   </form>
-  #}
 </div>

@@ -15,7 +15,10 @@
     {% if current_user.is_authenticated %}
       <a href="/applications">My applications</a>
       <a href="/account">Account</a>
-      <a href="{{ url_for('auth.logout') }}">Log out</a>
+      <form method="post" action="{{ url_for('auth.logout') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit">Log out</button>
+      </form>
     {% else %}
       <a href="/login">Log in</a>
       <a href="/register">Register</a>
