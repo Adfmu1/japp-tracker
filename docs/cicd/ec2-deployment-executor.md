@@ -18,16 +18,30 @@ ec2-deployment-executor.sh IMAGE_REF APP_SECRET_ID DB_SECRET_ID
 using `COSIGN_CERTIFICATE_IDENTITY` and `COSIGN_OIDC_ISSUER` before reading
 Secrets Manager or changing Kubernetes state.
 
+`JAPP_RELEASE_COMMIT` contains the 40-character source commit SHA. The executor
+acquires `JAPP_DEPLOYMENT_LOCK_FILE` (default:
+`/var/lock/japp-production-deployment.lock`) before verification and holds it
+through migration, rollout, and smoke checks. This serializes releases and
+migrations on the single-node host.
+
 Secrets are captured in mode-0600 temporary files and converted directly to
 Kubernetes Secret manifests through `kubectl ... --dry-run=client -o yaml |
 kubectl apply -f -`. Secret values are never arguments, status output, or
 workflow output. Temporary files are removed on exit.
 
 The executor applies the migration Job and waits for completion before applying
-the application Deployment. It records the previous digest, requires rollout
-success, and optionally checks `${JAPP_PUBLIC_URL}/healthz`. A failed rollout
-or smoke check restores the previous application digest. Database migrations
-are not automatically reversed.
+the application Deployment. A migration failure emits `migration_failed` and
+exits before applying the Deployment. It records the previous digest, requires
+rollout success (including the Deployment readiness probe), and optionally
+checks `${JAPP_PUBLIC_URL}/healthz`. A failed rollout or smoke check restores
+the previous application digest. Database migrations are not automatically
+reversed. Status output includes the release commit and digest, plus migration
+and rollout results.
+
+Migration revisions must follow expand/contract compatibility: add or widen
+schema elements before the application depends on them, keep the previous
+release able to run during the rollout, and remove obsolete elements only in a
+later release.
 
 ## SSM result codes
 

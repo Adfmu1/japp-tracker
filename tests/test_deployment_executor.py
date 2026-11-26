@@ -64,6 +64,7 @@ def test_executor_rejects_a_mutable_tag_before_external_calls():
             **os.environ,
             "COSIGN_CERTIFICATE_IDENTITY": "release@example.invalid",
             "COSIGN_OIDC_ISSUER": "https://token.actions.githubusercontent.com",
+            "JAPP_RELEASE_COMMIT": "a" * 40,
         },
         capture_output=True,
         text=True,
@@ -72,6 +73,26 @@ def test_executor_rejects_a_mutable_tag_before_external_calls():
 
     assert result.returncode == 10
     assert "deployment_status=authentication_failure" in result.stdout
+
+
+def test_executor_serializes_releases_and_records_release_identity():
+    text = EXECUTOR.read_text()
+
+    assert "flock" in text
+    assert "JAPP_DEPLOYMENT_LOCK_FILE" in text
+    assert "JAPP_RELEASE_COMMIT" in text
+    assert "release_commit=" in text
+    assert "release_digest=" in text
+
+
+def test_executor_migration_failure_precedes_any_application_change():
+    text = EXECUTOR.read_text()
+
+    migration = text.index("migration_succeeded")
+    application_apply = text.index('apply -f "$rendered_app"')
+    assert migration < application_apply
+    assert "migration_failed" in text
+    assert "rollout_succeeded" in text
 
 
 def test_executor_redacts_secret_manager_failure_with_mocked_commands(tmp_path):
@@ -92,6 +113,7 @@ def test_executor_redacts_secret_manager_failure_with_mocked_commands(tmp_path):
             "PATH": f"{bin_dir}:/usr/bin:/bin",
             "COSIGN_CERTIFICATE_IDENTITY": "release@example.invalid",
             "COSIGN_OIDC_ISSUER": "https://token.actions.githubusercontent.com",
+            "JAPP_RELEASE_COMMIT": "a" * 40,
         },
         capture_output=True,
         text=True,

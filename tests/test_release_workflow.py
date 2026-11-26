@@ -66,3 +66,14 @@ def test_release_publishes_machine_readable_artifact_metadata_for_cd():
     assert "digest=${DIGEST}" in workflow
     assert "commit=${RELEASE_SHA}" in workflow
     assert "verify the signature" in workflow.lower()
+
+
+def test_deploy_workflow_requires_commit_identity_and_records_release_results():
+    workflow = (WORKFLOW.parent / "deploy.yml").read_text()
+
+    assert "release_commit:" in workflow
+    assert "RELEASE_COMMIT" in workflow
+    assert "JAPP_RELEASE_COMMIT" in workflow
+    assert "migration_result" in workflow
+    assert "rollout_result" in workflow
+    assert "GITHUB_STEP_SUMMARY" in workflow

@@ -14,9 +14,11 @@ readonly DEPLOYMENT="${JAPP_DEPLOYMENT:-japp-app}"
 readonly APP_SECRET_NAME="${JAPP_APP_SECRET_NAME:-app-secrets}"
 readonly DB_SECRET_NAME="${JAPP_DB_SECRET_NAME:-db-secrets}"
 readonly MANIFEST_DIR="${JAPP_MANIFEST_DIR:-/opt/japp/k8s}"
+readonly DEPLOYMENT_LOCK_FILE="${JAPP_DEPLOYMENT_LOCK_FILE:-/var/lock/japp-production-deployment.lock}"
 
 status() {
-  printf 'deployment_status=%s\n' "$1"
+  printf 'deployment_status=%s release_commit=%s release_digest=%s\n' \
+    "$1" "$RELEASE_COMMIT" "$RELEASE_DIGEST"
 }
 
 fail() {
@@ -35,8 +37,19 @@ usage() {
 readonly IMAGE_REF="$1"
 readonly APP_SECRET_ID="$2"
 readonly DB_SECRET_ID="$3"
+readonly RELEASE_COMMIT="${JAPP_RELEASE_COMMIT:?JAPP_RELEASE_COMMIT is required}"
+readonly RELEASE_DIGEST="${IMAGE_REF##*@}"
 readonly COSIGN_IDENTITY="${COSIGN_CERTIFICATE_IDENTITY:?COSIGN_CERTIFICATE_IDENTITY is required}"
 readonly COSIGN_ISSUER="${COSIGN_OIDC_ISSUER:?COSIGN_OIDC_ISSUER is required}"
+
+# Hold the lock across verification, migration, rollout, and smoke checks so
+# releases cannot race one another on the single-node target.
+exec 9>"$DEPLOYMENT_LOCK_FILE"
+flock 9
+
+if [[ ! "$RELEASE_COMMIT" =~ ^[a-f0-9]{40}$ ]]; then
+  fail "$AUTHENTICATION_FAILURE" "authentication_failure"
+fi
 
 # Only a fully-qualified digest is accepted. In particular, tags such as
 # "latest" are never passed to Kubernetes.
@@ -111,6 +124,7 @@ fi
 if ! kubectl -n "$NAMESPACE" apply -f "$rendered_migration" >/dev/null 2>&1 ||
   ! kubectl -n "$NAMESPACE" wait --for=condition=complete \
     --timeout="${JAPP_MIGRATION_TIMEOUT:-300s}" job/japp-db-migrate >/dev/null 2>&1; then
+  status "migration_failed"
   fail "$CLUSTER_FAILURE" "cluster_failure"
 fi
 status "migration_succeeded"
@@ -118,6 +132,7 @@ status "migration_succeeded"
 if ! kubectl -n "$NAMESPACE" apply -f "$rendered_app" >/dev/null 2>&1 ||
   ! kubectl -n "$NAMESPACE" rollout status deployment/"$DEPLOYMENT" \
     --timeout="${JAPP_ROLLOUT_TIMEOUT:-300s}" >/dev/null 2>&1; then
+  status "rollout_failed"
   kubectl -n "$NAMESPACE" set image deployment/"$DEPLOYMENT" \
     "app=$previous_image" >/dev/null 2>&1 || true
   kubectl -n "$NAMESPACE" rollout status deployment/"$DEPLOYMENT" \
@@ -129,6 +144,7 @@ status "rollout_succeeded"
 if [[ -n "${JAPP_PUBLIC_URL:-}" ]] &&
   ! curl --fail --silent --show-error --max-time "${JAPP_SMOKE_TIMEOUT:-15}" \
     "$JAPP_PUBLIC_URL/healthz" >/dev/null 2>&1; then
+  status "rollout_failed"
   kubectl -n "$NAMESPACE" set image deployment/"$DEPLOYMENT" \
     "app=$previous_image" >/dev/null 2>&1 || true
   kubectl -n "$NAMESPACE" rollout status deployment/"$DEPLOYMENT" \
