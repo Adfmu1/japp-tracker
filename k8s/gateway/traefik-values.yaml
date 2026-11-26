@@ -5,7 +5,6 @@ deployment:
 providers:
   kubernetesGateway:
     enabled: true
-    gatewayClass: traefik
   kubernetesIngress:
     enabled: false
   kubernetesCRD:
@@ -16,11 +15,16 @@ gateway:
   name: japp-gateway
   namespace: japp
   listeners:
+    web:
+      port: 8000
+      protocol: HTTP
+      namespacePolicy:
+        from: Same
     websecure:
       port: 8443
       protocol: HTTPS
       certificateRefs:
-        - name: japp-ip-tls
+        - name: japp-duckdns-tls
           kind: Secret
       namespacePolicy:
         from: Same
@@ -30,6 +34,7 @@ ports:
     expose:
       default: false
   web:
+    hostPort: 80
     expose:
       default: false
   websecure:
