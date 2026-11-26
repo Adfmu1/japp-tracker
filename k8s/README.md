@@ -42,16 +42,12 @@ that tag through `IMAGE`. Do not reuse a tag with cached local images.
 For a single-node cluster with limited memory, the `rds` overlay deploys only
 the app and its ClusterIP service; PostgreSQL runs outside Kubernetes. Create
 the `app-secrets` Secret in namespace `japp` with `SECRET_KEY` and a
-`DB_URL` that points to the RDS endpoint and enables TLS. The helper prompts
-for the RDS password without echoing or saving it, then sends the Secret to the
-cluster over SSH:
-
-```sh
-python3 scripts/configure-rds-secret.py
-```
+`DB_URL` that points to the RDS endpoint and enables TLS. Provision this Secret
+through your approved secret-management or cluster-administration workflow.
+Do not put database credentials in this repository.
 
 The RDS CA bundle is mounted into the app and migration containers for
-`sslmode=verify-full`. Do not put database credentials in this repository.
+`sslmode=verify-full`.
 
 Build/import the app image as above, then run:
 
