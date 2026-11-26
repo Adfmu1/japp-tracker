@@ -11,6 +11,10 @@ on:
         description: "40-character commit SHA that produced the release image"
         required: true
         type: string
+      signer:
+        description: "Cosign certificate identity recorded by the release candidate"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -23,6 +27,9 @@ concurrency:
 jobs:
   deploy:
     name: Deploy through SSM
+    # workflow_dispatch can be started from any ref; Only the main branch can
+    # promote a protected production candidate.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: production
     env:
@@ -33,7 +40,7 @@ jobs:
       DB_SECRET_ID: ${{ vars.DB_SECRET_ID }}
       JAPP_PUBLIC_URL: ${{ vars.JAPP_PUBLIC_URL }}
       JAPP_EXPECTED_HOSTNAME: ${{ vars.JAPP_EXPECTED_HOSTNAME }}
-      COSIGN_CERTIFICATE_IDENTITY: ${{ vars.COSIGN_CERTIFICATE_IDENTITY }}
+      COSIGN_CERTIFICATE_IDENTITY: ${{ inputs.signer }}
       COSIGN_OIDC_ISSUER: https://token.actions.githubusercontent.com
     steps:
       - name: Validate release identity
@@ -44,6 +51,7 @@ jobs:
           set -euo pipefail
           [[ "$IMAGE_REF" =~ ^[a-z0-9./_-]+@sha256:[a-f0-9]{64}$ ]]
           [[ "$RELEASE_COMMIT" =~ ^[a-f0-9]{40}$ ]]
+          [[ -n "$COSIGN_CERTIFICATE_IDENTITY" ]]
           [[ -n "$AWS_SSM_INSTANCE_ID" && -n "$AWS_REGION" && -n "$AWS_ROLE_ARN" ]]
           [[ -n "$APP_SECRET_ID" && -n "$DB_SECRET_ID" ]]
           [[ "$JAPP_PUBLIC_URL" =~ ^https://[^/@:]+(:[0-9]+)?(/.*)?$ ]]
@@ -108,11 +116,16 @@ jobs:
                 printf '%s\n' "$output"
                 {
                   echo "## Production deployment"
+                  echo "- status: \`successful\`"
+                  echo "- approved_by: \`${{ github.actor }}\`"
                   echo "- commit: \`$RELEASE_COMMIT\`"
                   echo "- image digest: \`$IMAGE_REF\`"
+                  echo "- signer_result: \`$COSIGN_CERTIFICATE_IDENTITY\`"
                   echo "- migration_result: \`$(printf '%s\n' "$output" | grep -o 'deployment_status=migration_[a-z_]*' | tail -n 1 || true)\`"
                   echo "- rollout_result: \`$(printf '%s\n' "$output" | grep -o 'deployment_status=rollout_[a-z_]*' | tail -n 1 || true)\`"
                   echo "- acceptance_result: \`$(printf '%s\n' "$output" | grep -o 'deployment_status=\\(healthz\\|readyz\\|gateway\\|certificate\\|https_redirect\\)_[a-z_]*' | tail -n 1 || true)\`"
+                  echo "- smoke_test_result: \`$(printf '%s\n' "$output" | grep -o 'deployment_status=\\(healthz\\|readyz\\|gateway\\|certificate\\|https_redirect\\)_[a-z_]*' | tail -n 1 || true)\`"
+                  echo "- rollback_result: \`not_required\`"
                 } >> "$GITHUB_STEP_SUMMARY"
                 exit 0
                 ;;
@@ -124,11 +137,16 @@ jobs:
                 printf '%s\n' "$output"
                 {
                   echo "## Production deployment failed"
+                  echo "- status: \`unsuccessful\`"
+                  echo "- approved_by: \`${{ github.actor }}\`"
                   echo "- commit: \`$RELEASE_COMMIT\`"
                   echo "- image digest: \`$IMAGE_REF\`"
+                  echo "- signer_result: \`$COSIGN_CERTIFICATE_IDENTITY\`"
                   echo "- migration_result: \`$(printf '%s\n' "$output" | grep -o 'deployment_status=migration_[a-z_]*' | tail -n 1 || true)\`"
                   echo "- rollout_result: \`$(printf '%s\n' "$output" | grep -o 'deployment_status=rollout_[a-z_]*' | tail -n 1 || true)\`"
                   echo "- acceptance_result: \`$(printf '%s\n' "$output" | grep -o 'deployment_status=acceptance_failed_[a-z_]*' | tail -n 1 || true)\`"
+                  echo "- smoke_test_result: \`$(printf '%s\n' "$output" | grep -o 'deployment_status=acceptance_failed_[a-z_]*' | tail -n 1 || true)\`"
+                  echo "- rollback_result: \`$(printf '%s\n' "$output" | grep -o 'deployment_status=acceptance_failed_rolled_back' | tail -n 1 || true)\`"
                 } >> "$GITHUB_STEP_SUMMARY"
                 printf 'deployment_status=failed image_ref=%s\n' "$IMAGE_REF"
                 exit 1
@@ -136,5 +154,17 @@ jobs:
             esac
             sleep 5
           done
+          {
+            echo "## Production deployment failed"
+            echo "- status: \`unsuccessful\`"
+            echo "- approved_by: \`${{ github.actor }}\`"
+            echo "- commit: \`$RELEASE_COMMIT\`"
+            echo "- image digest: \`$IMAGE_REF\`"
+            echo "- signer_result: \`$COSIGN_CERTIFICATE_IDENTITY\`"
+            echo "- migration_result: \`unknown_command_timeout\`"
+            echo "- rollout_result: \`unknown_command_timeout\`"
+            echo "- smoke_test_result: \`not_reached\`"
+            echo "- rollback_result: \`unknown_command_timeout\`"
+          } >> "$GITHUB_STEP_SUMMARY"
           printf 'deployment_status=timeout image_ref=%s\n' "$IMAGE_REF"
           exit 1

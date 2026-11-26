@@ -98,3 +98,27 @@ certificates, or change security groups. Application CD remains responsible for
 using the immutable ECR digest through SSM. ECR retention preserves the
 rollback window; a failed application rollout must not reverse a successful
 database migration.
+
+## Operator release boundary
+
+A successful `main` merge produces a production candidate and evidence artifact;
+it does not deploy by itself. An operator starts the deployment workflow from
+`main`, supplies the candidate's exact digest, commit, and recorded Cosign
+signer, and a required reviewer approves the protected `production`
+environment. Feature-branch workflow runs are rejected before AWS
+authentication, and only one production deployment is active at a time.
+GitHub Actions keeps one pending deployment for the concurrency group; a newer
+pending candidate supersedes an older pending candidate rather than racing it.
+
+The release summary records the approved actor, source commit, immutable image
+digest, signer, migration, rollout, smoke/acceptance, and rollback results.
+Failures are marked unsuccessful and leave actionable status-only evidence.
+Secrets, private keys, credentials, and command output are never included in
+the summary or uploaded evidence.
+
+The target is one EC2 host running one k0s node. This automation therefore
+provides serialized deployment and application rollback, not high availability:
+host, node, ingress, or database failure can still make the service unavailable.
+Rollback restores only the previous application image digest after rollout or
+acceptance failure. A successful migration is deliberately retained; schema
+rollback is a separately reviewed operator action.
