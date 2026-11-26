@@ -25,6 +25,7 @@ def test_release_builds_and_pushes_one_sha_tagged_ecr_image():
     assert "docker/build-push-action@" in workflow
     assert "push: true" in workflow
     assert "tags: |" in workflow
+    assert ":sha-${{ github.event.workflow_run.head_sha }}" in workflow
     assert "github.event.workflow_run.head_sha" in workflow
     assert "aws-actions/configure-aws-credentials@" in workflow
     assert "aws-actions/amazon-ecr-login@" in workflow

@@ -87,7 +87,7 @@ jobs:
           context: .
           push: true
           tags: |
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.event.workflow_run.head_sha }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:sha-${{ github.event.workflow_run.head_sha }}
 
       - name: Record digest-qualified image identity
         id: image
