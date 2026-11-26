@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 WORKFLOW = Path(__file__).parents[1] / ".github" / "workflows" / "release.yml"
 
 
@@ -38,7 +37,10 @@ def test_release_records_digest_and_hands_off_only_digest_identity():
     assert "digest: ${{ steps.build.outputs.digest }}" in workflow
     assert "image-digest.txt" in workflow
     assert "sha256:" in workflow
-    assert "needs.release.outputs.digest" in workflow or "steps.build.outputs.digest" in workflow
+    assert (
+        "needs.release.outputs.digest" in workflow
+        or "steps.build.outputs.digest" in workflow
+    )
     assert "docker tag" not in workflow
     assert ":latest" not in workflow
 
