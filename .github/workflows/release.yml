@@ -15,9 +15,16 @@ permissions:
   packages: write
   attestations: write
 
+concurrency:
+  # Each commit gets one candidate. A newer completion supersedes a pending
+  # candidate for the same main branch instead of racing artifact publication.
+  group: production-candidate-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: true
+
 env:
   AWS_REGION: ${{ vars.AWS_REGION }}
   ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+  COSIGN_CERTIFICATE_IDENTITY: ${{ vars.COSIGN_CERTIFICATE_IDENTITY }}
 
 jobs:
   release:
@@ -105,6 +112,7 @@ jobs:
             echo "commit=${RELEASE_SHA}"
             echo "image=${IMAGE}"
             echo "digest=${DIGEST}"
+            echo "signer=${COSIGN_CERTIFICATE_IDENTITY}"
             echo "verification=CD must verify the signature and digest before deployment"
           } | tee image-digest.txt
 
@@ -128,4 +136,34 @@ jobs:
         with:
           name: release-metadata
           path: image-digest.txt
+          if-no-files-found: error
+
+      - name: Record production candidate evidence
+        env:
+          RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+          IMAGE: ${{ steps.image.outputs.image }}
+        run: |
+          set -Eeuo pipefail
+          test -n "$COSIGN_CERTIFICATE_IDENTITY"
+          {
+            echo "## Production candidate"
+            echo "- status: \`awaiting_protected_production_approval\`"
+            echo "- commit: \`$RELEASE_SHA\`"
+            echo "- image digest: \`$IMAGE\`"
+            echo "- signer: \`$COSIGN_CERTIFICATE_IDENTITY\`"
+            echo "- deployment: \`not_started\`"
+            echo "- superseded candidates: newer successful main candidates replace pending candidates"
+          } >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "candidate_status=awaiting_protected_production_approval"
+            echo "commit=$RELEASE_SHA"
+            echo "image=$IMAGE"
+            echo "signer=$COSIGN_CERTIFICATE_IDENTITY"
+          } > candidate-evidence.txt
+
+      - name: Publish candidate evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: candidate-evidence
+          path: candidate-evidence.txt
           if-no-files-found: error

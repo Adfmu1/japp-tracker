@@ -77,3 +77,36 @@ def test_deploy_workflow_requires_commit_identity_and_records_release_results():
     assert "migration_result" in workflow
     assert "rollout_result" in workflow
     assert "GITHUB_STEP_SUMMARY" in workflow
+
+
+def test_production_deploy_is_main_only_and_requires_explicit_approval():
+    workflow = (WORKFLOW.parent / "deploy.yml").read_text()
+
+    assert "workflow_dispatch:" in workflow
+    assert "environment: production" in workflow
+    assert "if: github.ref == 'refs/heads/main'" in workflow
+    assert "cancel-in-progress: false" in workflow
+    assert "Only the main branch" in workflow
+
+
+def test_release_candidate_and_deploy_evidence_include_signer_and_rollback():
+    release = read_workflow()
+    deploy = (WORKFLOW.parent / "deploy.yml").read_text()
+
+    assert "production candidate" in release.lower()
+    assert "signer=${COSIGN_CERTIFICATE_IDENTITY}" in release
+    assert "candidate-evidence" in release
+    assert "superseded" in release.lower()
+    assert "signer_result" in deploy
+    assert "rollback_result" in deploy
+    assert "approved_by" in deploy
+    assert "deployment_status=failed" in deploy
+
+
+def test_production_trust_policy_excludes_feature_branches():
+    policy = (WORKFLOW.parents[2] / "infra" / "aws" / "iam.tf").read_text()
+
+    assert '"repo:${var.github_repository}:ref:refs/heads/main"' in policy
+    assert '"repo:${var.github_repository}:environment:production"' in policy
+    assert "refs/heads/*" not in policy
+    assert "pull_request" not in policy
