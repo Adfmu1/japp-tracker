@@ -1,0 +1,97 @@
+name: Deploy production
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_ref:
+        description: "Fully-qualified ECR image digest from the release workflow"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: production-deployment
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy through SSM
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      AWS_SSM_INSTANCE_ID: ${{ vars.AWS_SSM_INSTANCE_ID }}
+      AWS_ROLE_ARN: ${{ secrets.AWS_PRODUCTION_ROLE_ARN }}
+      APP_SECRET_ID: ${{ vars.APP_SECRET_ID }}
+      DB_SECRET_ID: ${{ vars.DB_SECRET_ID }}
+      COSIGN_CERTIFICATE_IDENTITY: ${{ vars.COSIGN_CERTIFICATE_IDENTITY }}
+      COSIGN_OIDC_ISSUER: https://token.actions.githubusercontent.com
+    steps:
+      - name: Validate release identity
+        env:
+          IMAGE_REF: ${{ inputs.image_ref }}
+        run: |
+          set -euo pipefail
+          [[ "$IMAGE_REF" =~ ^[a-z0-9./_-]+@sha256:[a-f0-9]{64}$ ]]
+          [[ -n "$AWS_SSM_INSTANCE_ID" && -n "$AWS_REGION" && -n "$AWS_ROLE_ARN" ]]
+          [[ -n "$APP_SECRET_ID" && -n "$DB_SECRET_ID" ]]
+
+      - name: Configure AWS credentials with GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Invoke EC2 deployment executor
+        id: ssm
+        env:
+          IMAGE_REF: ${{ inputs.image_ref }}
+        run: |
+          set -euo pipefail
+          commands="$(jq -cn \
+            --arg image "$IMAGE_REF" \
+            --arg app_secret "$APP_SECRET_ID" \
+            --arg db_secret "$DB_SECRET_ID" \
+            --arg identity "$COSIGN_CERTIFICATE_IDENTITY" \
+            --arg issuer "$COSIGN_OIDC_ISSUER" \
+            '[
+              ("export COSIGN_CERTIFICATE_IDENTITY=" + ($identity|@sh)),
+              ("export COSIGN_OIDC_ISSUER=" + ($issuer|@sh)),
+              ("/opt/japp/bin/ec2-deployment-executor.sh " +
+                ($image|@sh) + " " + ($app_secret|@sh) + " " + ($db_secret|@sh))
+            ]')"
+          command_id="$(aws ssm send-command \
+            --instance-ids "$AWS_SSM_INSTANCE_ID" \
+            --document-name AWS-RunShellScript \
+            --parameters "commands=$commands" \
+            --query Command.CommandId --output text)"
+          printf '%s\n' "$command_id" > "$RUNNER_TEMP/ssm-command-id"
+
+      - name: Wait for deployment result
+        env:
+          IMAGE_REF: ${{ inputs.image_ref }}
+        run: |
+          set -euo pipefail
+          command_id="$(cat "$RUNNER_TEMP/ssm-command-id")"
+          for attempt in {1..60}; do
+            status="$(aws ssm get-command-invocation \
+              --command-id "$command_id" \
+              --instance-id "$AWS_SSM_INSTANCE_ID" \
+              --query StatusDetails --output text)"
+            case "$status" in
+              Success)
+                printf 'deployment_status=success image_ref=%s\n' "$IMAGE_REF"
+                exit 0
+                ;;
+              Failed|Cancelled|TimedOut|Cancelling)
+                printf 'deployment_status=failed image_ref=%s\n' "$IMAGE_REF"
+                exit 1
+                ;;
+            esac
+            sleep 5
+          done
+          printf 'deployment_status=timeout image_ref=%s\n' "$IMAGE_REF"
+          exit 1
