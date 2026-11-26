@@ -1,0 +1,10 @@
+aws_region        = "REPLACE_WITH_AWS_REGION"
+github_repository = "REPLACE_WITH_OWNER/REPOSITORY"
+
+# Set this only when the EC2 host already has an instance role. Leave null to
+# create the narrowly scoped role and instance profile in this module.
+ec2_instance_role_name = null
+
+# Populate with the ARNs output after the first apply, then apply again so the
+# EC2 policy can read only these two secret containers.
+secret_arns = []
