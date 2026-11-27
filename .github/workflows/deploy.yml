@@ -1,0 +1,208 @@
+name: Deploy production
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_run_id:
+        description: "Successful Release artifacts workflow run ID for the approved main-branch candidate"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+
+concurrency:
+  group: production-deployment
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy through SSM
+    # workflow_dispatch can be started from any ref; Only the main branch can
+    # promote a protected production candidate.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+      AWS_SSM_INSTANCE_ID: ${{ vars.AWS_SSM_INSTANCE_ID }}
+      AWS_ROLE_ARN: ${{ secrets.AWS_PRODUCTION_ROLE_ARN }}
+      APP_SECRET_ID: ${{ vars.APP_SECRET_ID }}
+      DB_SECRET_ID: ${{ vars.DB_SECRET_ID }}
+      JAPP_PUBLIC_URL: ${{ vars.JAPP_PUBLIC_URL }}
+      JAPP_EXPECTED_HOSTNAME: ${{ vars.JAPP_EXPECTED_HOSTNAME }}
+      EXPECTED_COSIGN_CERTIFICATE_IDENTITY: ${{ vars.COSIGN_CERTIFICATE_IDENTITY }}
+      COSIGN_OIDC_ISSUER: https://token.actions.githubusercontent.com
+    steps:
+      - name: Retrieve and validate trusted release candidate
+        id: candidate
+        env:
+          RELEASE_RUN_ID: ${{ inputs.release_run_id }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_RUN_ID" =~ ^[0-9]+$ ]]
+          run_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RELEASE_RUN_ID}")"
+          jq -e '
+            .name == "Release artifacts" and
+            .event == "workflow_run" and
+            .status == "completed" and
+            .conclusion == "success" and
+            .head_branch == "main" and
+            .head_repository.full_name == env.GITHUB_REPOSITORY
+          ' <<<"$run_json" >/dev/null
+          release_sha="$(jq -r '.head_sha' <<<"$run_json")"
+          [[ "$release_sha" =~ ^[a-f0-9]{40}$ ]]
+          candidate_dir="$RUNNER_TEMP/release-candidate"
+          mkdir -p "$candidate_dir"
+          gh run download "$RELEASE_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name release-metadata --dir "$candidate_dir"
+          metadata_file="$candidate_dir/image-digest.txt"
+          [[ -f "$metadata_file" ]]
+          commit="$(sed -n 's/^commit=//p' "$metadata_file")"
+          repository="$(sed -n 's/^repository=//p' "$metadata_file")"
+          image_ref="$(sed -n 's/^image=//p' "$metadata_file")"
+          digest="$(sed -n 's/^digest=//p' "$metadata_file")"
+          signer="$(sed -n 's/^signer=//p' "$metadata_file")"
+          [[ "$commit" == "$release_sha" && "$repository" == "$GITHUB_REPOSITORY" ]]
+          [[ "$commit" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+          [[ "$image_ref" == *@$digest && "$signer" == "$EXPECTED_COSIGN_CERTIFICATE_IDENTITY" ]]
+          [[ -n "$signer" ]]
+          [[ -n "$AWS_SSM_INSTANCE_ID" && -n "$AWS_REGION" && -n "$AWS_ROLE_ARN" ]]
+          [[ -n "$APP_SECRET_ID" && -n "$DB_SECRET_ID" ]]
+          [[ "$JAPP_PUBLIC_URL" =~ ^https://[^/@:]+(:[0-9]+)?(/.*)?$ ]]
+          [[ -n "$JAPP_EXPECTED_HOSTNAME" ]]
+          echo "image_ref=$image_ref" >> "$GITHUB_OUTPUT"
+          echo "release_commit=$commit" >> "$GITHUB_OUTPUT"
+          echo "signer=$signer" >> "$GITHUB_OUTPUT"
+
+      - name: Configure AWS credentials with GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Invoke EC2 deployment executor
+        id: ssm
+        env:
+          IMAGE_REF: ${{ steps.candidate.outputs.image_ref }}
+          RELEASE_COMMIT: ${{ steps.candidate.outputs.release_commit }}
+          COSIGN_CERTIFICATE_IDENTITY: ${{ steps.candidate.outputs.signer }}
+        run: |
+          set -euo pipefail
+          expected_repository_uri="$(aws ecr describe-repositories \
+            --repository-names "$ECR_REPOSITORY" \
+            --query 'repositories[0].repositoryUri' --output text)"
+          [[ "$IMAGE_REF" == "$expected_repository_uri"@sha256:* ]]
+          expected_digest="$(aws ecr describe-images \
+            --repository-name "$ECR_REPOSITORY" \
+            --image-ids "imageTag=sha-${RELEASE_COMMIT}" \
+            --query 'imageDetails[0].imageDigest' --output text)"
+          [[ "$IMAGE_REF" == "$expected_repository_uri@$expected_digest" ]]
+          cosign verify \
+            --certificate-identity "$COSIGN_CERTIFICATE_IDENTITY" \
+            --certificate-oidc-issuer "$COSIGN_OIDC_ISSUER" \
+            "$IMAGE_REF" >/dev/null
+          commands="$(jq -cn \
+            --arg image "$IMAGE_REF" \
+            --arg app_secret "$APP_SECRET_ID" \
+            --arg db_secret "$DB_SECRET_ID" \
+            --arg identity "$COSIGN_CERTIFICATE_IDENTITY" \
+            --arg issuer "$COSIGN_OIDC_ISSUER" \
+            --arg public_url "$JAPP_PUBLIC_URL" \
+            --arg expected_hostname "$JAPP_EXPECTED_HOSTNAME" \
+            --arg commit "$RELEASE_COMMIT" \
+            '[
+              ("export COSIGN_CERTIFICATE_IDENTITY=" + ($identity|@sh)),
+              ("export COSIGN_OIDC_ISSUER=" + ($issuer|@sh)),
+              ("export JAPP_PUBLIC_URL=" + ($public_url|@sh)),
+              ("export JAPP_EXPECTED_HOSTNAME=" + ($expected_hostname|@sh)),
+              ("export JAPP_RELEASE_COMMIT=" + ($commit|@sh)),
+              ("/opt/japp/bin/ec2-deployment-executor.sh " +
+                ($image|@sh) + " " + ($app_secret|@sh) + " " + ($db_secret|@sh))
+            ]')"
+          command_id="$(aws ssm send-command \
+            --instance-ids "$AWS_SSM_INSTANCE_ID" \
+            --document-name AWS-RunShellScript \
+            --parameters "commands=$commands" \
+            --query Command.CommandId --output text)"
+          printf '%s\n' "$command_id" > "$RUNNER_TEMP/ssm-command-id"
+
+      - name: Wait for deployment result
+        env:
+          IMAGE_REF: ${{ steps.candidate.outputs.image_ref }}
+          RELEASE_COMMIT: ${{ steps.candidate.outputs.release_commit }}
+          COSIGN_CERTIFICATE_IDENTITY: ${{ steps.candidate.outputs.signer }}
+        run: |
+          set -euo pipefail
+          command_id="$(cat "$RUNNER_TEMP/ssm-command-id")"
+          for attempt in {1..60}; do
+            status="$(aws ssm get-command-invocation \
+              --command-id "$command_id" \
+              --instance-id "$AWS_SSM_INSTANCE_ID" \
+              --query StatusDetails --output text)"
+            case "$status" in
+              Success)
+                output="$(aws ssm get-command-invocation \
+                  --command-id "$command_id" \
+                  --instance-id "$AWS_SSM_INSTANCE_ID" \
+                  --query StandardOutputContent --output text)"
+                printf '%s\n' "$output"
+                {
+                  echo "## Production deployment"
+                  echo "- status: \`successful\`"
+                  echo "- approved_by: \`${{ github.actor }}\`"
+                  echo "- commit: \`$RELEASE_COMMIT\`"
+                  echo "- image digest: \`$IMAGE_REF\`"
+                  echo "- signer_result: \`$COSIGN_CERTIFICATE_IDENTITY\`"
+                  echo "- migration_result: \`$(printf '%s\n' "$output" | grep -o 'deployment_status=migration_[a-z_]*' | tail -n 1 || true)\`"
+                  echo "- rollout_result: \`$(printf '%s\n' "$output" | grep -o 'deployment_status=rollout_[a-z_]*' | tail -n 1 || true)\`"
+                  echo "- acceptance_result: \`$(printf '%s\n' "$output" | grep -o 'deployment_status=\\(healthz\\|readyz\\|gateway\\|certificate\\|https_redirect\\)_[a-z_]*' | tail -n 1 || true)\`"
+                  echo "- smoke_test_result: \`$(printf '%s\n' "$output" | grep -o 'deployment_status=\\(healthz\\|readyz\\|gateway\\|certificate\\|https_redirect\\)_[a-z_]*' | tail -n 1 || true)\`"
+                  echo "- rollback_result: \`not_required\`"
+                } >> "$GITHUB_STEP_SUMMARY"
+                exit 0
+                ;;
+              Failed|Cancelled|TimedOut|Cancelling)
+                output="$(aws ssm get-command-invocation \
+                  --command-id "$command_id" \
+                  --instance-id "$AWS_SSM_INSTANCE_ID" \
+                  --query StandardOutputContent --output text || true)"
+                printf '%s\n' "$output"
+                {
+                  echo "## Production deployment failed"
+                  echo "- status: \`unsuccessful\`"
+                  echo "- approved_by: \`${{ github.actor }}\`"
+                  echo "- commit: \`$RELEASE_COMMIT\`"
+                  echo "- image digest: \`$IMAGE_REF\`"
+                  echo "- signer_result: \`$COSIGN_CERTIFICATE_IDENTITY\`"
+                  echo "- migration_result: \`$(printf '%s\n' "$output" | grep -o 'deployment_status=migration_[a-z_]*' | tail -n 1 || true)\`"
+                  echo "- rollout_result: \`$(printf '%s\n' "$output" | grep -o 'deployment_status=rollout_[a-z_]*' | tail -n 1 || true)\`"
+                  echo "- acceptance_result: \`$(printf '%s\n' "$output" | grep -o 'deployment_status=acceptance_failed_[a-z_]*' | tail -n 1 || true)\`"
+                  echo "- smoke_test_result: \`$(printf '%s\n' "$output" | grep -o 'deployment_status=acceptance_failed_[a-z_]*' | tail -n 1 || true)\`"
+                  echo "- rollback_result: \`$(printf '%s\n' "$output" | grep -o 'deployment_status=acceptance_failed_rolled_back' | tail -n 1 || true)\`"
+                } >> "$GITHUB_STEP_SUMMARY"
+                printf 'deployment_status=failed image_ref=%s\n' "$IMAGE_REF"
+                exit 1
+                ;;
+            esac
+            sleep 5
+          done
+          {
+            echo "## Production deployment failed"
+            echo "- status: \`unsuccessful\`"
+            echo "- approved_by: \`${{ github.actor }}\`"
+            echo "- commit: \`$RELEASE_COMMIT\`"
+            echo "- image digest: \`$IMAGE_REF\`"
+            echo "- signer_result: \`$COSIGN_CERTIFICATE_IDENTITY\`"
+            echo "- migration_result: \`unknown_command_timeout\`"
+            echo "- rollout_result: \`unknown_command_timeout\`"
+            echo "- smoke_test_result: \`not_reached\`"
+            echo "- rollback_result: \`unknown_command_timeout\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+          printf 'deployment_status=timeout image_ref=%s\n' "$IMAGE_REF"
+          exit 1

@@ -50,6 +50,13 @@ data "aws_iam_policy_document" "github_production" {
   }
 
   statement {
+    sid       = "VerifyApplicationImage"
+    effect    = "Allow"
+    actions   = ["ecr:DescribeImages", "ecr:DescribeRepositories"]
+    resources = [aws_ecr_repository.application.arn]
+  }
+
+  statement {
     sid       = "AuthenticateToEcr"
     effect    = "Allow"
     actions   = ["ecr:GetAuthorizationToken"]
@@ -57,9 +64,19 @@ data "aws_iam_policy_document" "github_production" {
   }
 
   statement {
-    sid       = "DeployThroughSsm"
+    sid     = "DeployThroughSsm"
+    effect  = "Allow"
+    actions = ["ssm:SendCommand"]
+    resources = [
+      var.deployment_instance_arn,
+      "arn:aws:ssm:${var.aws_region}::document/AWS-RunShellScript",
+    ]
+  }
+
+  statement {
+    sid       = "ReadSsmCommandStatus"
     effect    = "Allow"
-    actions   = ["ssm:DescribeInstanceInformation", "ssm:GetCommandInvocation", "ssm:SendCommand"]
+    actions   = ["ssm:DescribeInstanceInformation", "ssm:GetCommandInvocation"]
     resources = ["*"]
   }
 }

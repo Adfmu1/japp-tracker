@@ -29,6 +29,17 @@ def test_aws_bootstrap_restricts_github_oidc_to_main_and_production():
     assert 'resource "aws_iam_openid_connect_provider" "github_actions"' in iam
 
 
+def test_github_ssm_send_command_is_limited_to_the_approved_instance_and_document():
+    iam = read_infra("iam.tf")
+
+    send_command = iam[iam.index('sid     = "DeployThroughSsm"') :]
+    send_command = send_command[: send_command.index("  }\n\n  statement")]
+    assert '"ssm:SendCommand"' in send_command
+    assert "var.deployment_instance_arn" in send_command
+    assert "AWS-RunShellScript" in send_command
+    assert 'resources = ["*"]' not in send_command
+
+
 def test_ec2_role_is_limited_to_ecr_pull_ssm_and_named_secret_reads():
     iam = read_infra("iam.tf")
 

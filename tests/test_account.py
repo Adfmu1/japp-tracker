@@ -1,3 +1,4 @@
+import os
 import uuid
 
 import pytest
@@ -8,7 +9,7 @@ from app.models import JobApplication, User, db
 
 class TestConfig:
     SECRET_KEY = "test-secret-key-that-is-at-least-32-characters"
-    SQLALCHEMY_DATABASE_URI = "sqlite:///:memory:"
+    SQLALCHEMY_DATABASE_URI = os.environ.get("TEST_DATABASE_URL", "sqlite:///:memory:")
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     TESTING = True
     WTF_CSRF_ENABLED = False
@@ -22,6 +23,7 @@ def client():
     with app.app_context():
         db.create_all()
         yield app.test_client()
+        db.session.remove()
         db.drop_all()
 
 
@@ -29,7 +31,7 @@ def create_user(client):
     with client.application.app_context():
         user = User(
             id=uuid.uuid4(),
-            username=f"user-{uuid.uuid4()}",
+            username=f"user-{uuid.uuid4().hex[:8]}",
             email=f"{uuid.uuid4()}@example.com",
         )
         user.set_password("correct-password")

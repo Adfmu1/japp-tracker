@@ -15,6 +15,10 @@ empty secret containers. Apply once more with the two secret ARNs so the EC2
 inline policy is constrained to those exact resources. Secret versions and
 values are intentionally managed outside Terraform.
 
+`deployment_instance_arn` must be the exact ARN of the production EC2 instance.
+The GitHub production role can send `AWS-RunShellScript` only to that instance;
+SSM command status reads remain separate read-only permissions.
+
 ## Scope
 
 - `ecr.tf`: private immutable repository and bounded lifecycle policy.
