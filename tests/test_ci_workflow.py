@@ -14,6 +14,14 @@ def test_ci_workflow_validates_pull_requests_and_main_pushes():
     assert "pytest" in workflow
 
 
+def test_ci_workflow_runs_pytest_with_project_root_import_path():
+    workflow = WORKFLOW.read_text()
+
+    pytest_step = workflow.split("- name: Run pytest", maxsplit=1)[1]
+
+    assert "run: python -m pytest" in pytest_step or "PYTHONPATH=." in pytest_step
+
+
 def test_ci_workflow_provides_postgresql_without_exposing_credentials():
     workflow = WORKFLOW.read_text()
 
