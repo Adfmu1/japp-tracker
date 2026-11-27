@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 WORKFLOW = Path(__file__).parents[1] / ".github" / "workflows" / "release.yml"
@@ -108,6 +109,40 @@ def test_deploy_workflow_accepts_only_a_verified_release_run_metadata_artifact()
     assert "inputs.image_ref" not in workflow
     assert "inputs.release_commit" not in workflow
     assert "inputs.signer" not in workflow
+
+
+def test_deploy_installs_cosign_and_logs_into_ecr_before_verification():
+    release = read_workflow()
+    deploy = (WORKFLOW.parent / "deploy.yml").read_text()
+    first_verify = re.search(
+        r"^[ \t]*(?:run:[ \t]+)?cosign verify\b", deploy, re.MULTILINE
+    )
+    assert first_verify, "deploy.yml must verify the release signature"
+    before_verify = deploy[: first_verify.start()]
+
+    for action, description in (
+        ("sigstore/cosign-installer", "Cosign installer"),
+        ("aws-actions/amazon-ecr-login", "ECR login"),
+    ):
+        action_ref = rf"^[ \t]*uses: {re.escape(action)}@"
+        end_of_ref = r"[ \t]*(?:#|$)"
+        release_pin = re.search(
+            rf"{action_ref}([0-9a-f]{{40}}){end_of_ref}", release, re.MULTILINE
+        )
+        assert release_pin, f"release.yml must pin the {description} to a commit SHA"
+        deploy_step = re.search(
+            rf"{action_ref}{release_pin[1]}{end_of_ref}", before_verify, re.MULTILINE
+        )
+        assert deploy_step, (
+            f"deploy.yml must run the {description} with the release.yml pin "
+            "before the first cosign verify"
+        )
+        if action == "aws-actions/amazon-ecr-login":
+            assert re.search(
+                r"^[ \t]*uses: aws-actions/configure-aws-credentials@",
+                before_verify[: deploy_step.start()],
+                re.MULTILINE,
+            ), "deploy.yml must configure AWS credentials before ECR login"
 
 
 def test_production_deploy_is_main_only_and_requires_explicit_approval():

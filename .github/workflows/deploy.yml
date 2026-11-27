@@ -86,6 +86,12 @@ jobs:
           role-to-assume: ${{ env.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Log in to private ECR
+        uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076 # v2.0.1
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@1aa8e0f2454b781fbf0fbf306a4c9533a0c57409 # v3.7.0
+
       - name: Invoke EC2 deployment executor
         id: ssm
         env:
