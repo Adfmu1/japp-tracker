@@ -19,6 +19,17 @@ def test_release_waits_for_successful_ci_and_security_workflows_on_main():
     assert "workflow_run.head_branch == 'main'" in workflow
 
 
+def test_release_gate_lookup_explicitly_targets_github_repository_before_checkout():
+    workflow = read_workflow()
+    gate_wait_step = workflow.split("      - name: Wait for both required gates", 1)[1]
+    gate_wait_step = gate_wait_step.split(
+        "      - name: Check out the gated commit", 1
+    )[0]
+    gh_run_list = gate_wait_step.split("gh run list", 1)[1].split(")", 1)[0]
+
+    assert '--repo "$GITHUB_REPOSITORY"' in gh_run_list
+
+
 def test_release_builds_and_pushes_one_sha_tagged_ecr_image():
     workflow = read_workflow()
 
