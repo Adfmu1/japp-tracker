@@ -37,6 +37,9 @@ def test_release_records_digest_and_hands_off_only_digest_identity():
 
     assert "digest: ${{ steps.build.outputs.digest }}" in workflow
     assert "image-digest.txt" in workflow
+    assert "Scan the exact release image" in workflow
+    assert 'image "$IMAGE"' in workflow
+    assert "--pkg-types os" in workflow
     assert "sha256:" in workflow
     assert (
         "needs.release.outputs.digest" in workflow
@@ -71,12 +74,29 @@ def test_release_publishes_machine_readable_artifact_metadata_for_cd():
 def test_deploy_workflow_requires_commit_identity_and_records_release_results():
     workflow = (WORKFLOW.parent / "deploy.yml").read_text()
 
-    assert "release_commit:" in workflow
+    assert "release_commit=$commit" in workflow
     assert "RELEASE_COMMIT" in workflow
     assert "JAPP_RELEASE_COMMIT" in workflow
     assert "migration_result" in workflow
     assert "rollout_result" in workflow
     assert "GITHUB_STEP_SUMMARY" in workflow
+
+
+def test_deploy_workflow_accepts_only_a_verified_release_run_metadata_artifact():
+    workflow = (WORKFLOW.parent / "deploy.yml").read_text()
+
+    assert "release_run_id:" in workflow
+    assert "gh api" in workflow
+    assert '.event == "workflow_run"' in workflow
+    assert '.head_branch == "main"' in workflow
+    assert "gh run download" in workflow
+    assert "repository=" in (WORKFLOW.parent / "release.yml").read_text()
+    assert "describe-images" in workflow
+    assert "imageTag=sha-${RELEASE_COMMIT}" in workflow
+    assert "cosign verify" in workflow
+    assert "inputs.image_ref" not in workflow
+    assert "inputs.release_commit" not in workflow
+    assert "inputs.signer" not in workflow
 
 
 def test_production_deploy_is_main_only_and_requires_explicit_approval():

@@ -123,7 +123,8 @@ if ! sed "s|__IMAGE__|$IMAGE_REF|g" "$MANIFEST_DIR/migration-job.yaml" >"$render
   fail "$MANIFEST_FAILURE" "manifest_failure"
 fi
 
-if ! kubectl -n "$NAMESPACE" apply -f "$rendered_migration" >/dev/null 2>&1 ||
+if ! kubectl -n "$NAMESPACE" delete job japp-db-migrate --ignore-not-found=true --wait=true >/dev/null 2>&1 ||
+  ! kubectl -n "$NAMESPACE" apply -f "$rendered_migration" >/dev/null 2>&1 ||
   ! kubectl -n "$NAMESPACE" wait --for=condition=complete \
     --timeout="${JAPP_MIGRATION_TIMEOUT:-300s}" job/japp-db-migrate >/dev/null 2>&1; then
   status "migration_failed"

@@ -73,23 +73,23 @@ jobs:
           done
 
       - name: Check out the gated commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
 
       - name: Configure AWS credentials with GitHub OIDC
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
         with:
           aws-region: ${{ env.AWS_REGION }}
           role-to-assume: ${{ vars.AWS_RELEASE_ROLE_ARN }}
 
       - name: Log in to private ECR
         id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
+        uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076 # v2.0.1
 
       - name: Build and push the release image once
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
         with:
           context: .
           push: true
@@ -110,14 +110,32 @@ jobs:
           echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
           {
             echo "commit=${RELEASE_SHA}"
+            echo "repository=${GITHUB_REPOSITORY}"
             echo "image=${IMAGE}"
             echo "digest=${DIGEST}"
             echo "signer=${COSIGN_CERTIFICATE_IDENTITY}"
             echo "verification=CD must verify the signature and digest before deployment"
           } | tee image-digest.txt
 
+      - name: Scan the exact release image
+        env:
+          IMAGE: ${{ steps.image.outputs.image }}
+        run: |
+          set -Eeuo pipefail
+          docker run --rm \
+            --volume /var/run/docker.sock:/var/run/docker.sock \
+            --volume "$HOME/.docker:/root/.docker:ro" \
+            aquasec/trivy@sha256:029e990b328d149bf0a9ffe355919041e1f86192db2df47e217f8a36dd42ceac \
+            image "$IMAGE" \
+            --scanners vuln \
+            --pkg-types os \
+            --severity MEDIUM,HIGH,CRITICAL \
+            --exit-code 1 \
+            --ignore-unfixed \
+            --format table
+
       - name: Install Cosign
-        uses: sigstore/cosign-installer@v3.7.0
+        uses: sigstore/cosign-installer@1aa8e0f2454b781fbf0fbf306a4c9533a0c57409 # v3.7.0
 
       - name: Sign image with keyless Cosign and GitHub OIDC
         env:
@@ -125,14 +143,14 @@ jobs:
         run: cosign sign --yes "$IMAGE"
 
       - name: Publish SLSA provenance to the registry
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@c074443f1aee8d4aeeae555aebba3282517141b2 # v2.2.3
         with:
           subject-name: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
 
       - name: Publish release metadata for CD
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-metadata
           path: image-digest.txt
@@ -162,7 +180,7 @@ jobs:
           } > candidate-evidence.txt
 
       - name: Publish candidate evidence
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: candidate-evidence
           path: candidate-evidence.txt

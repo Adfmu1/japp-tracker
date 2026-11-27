@@ -1,5 +1,6 @@
 aws_region        = "REPLACE_WITH_AWS_REGION"
 github_repository = "REPLACE_WITH_OWNER/REPOSITORY"
+deployment_instance_arn = "arn:aws:ec2:REPLACE_WITH_REGION:REPLACE_WITH_ACCOUNT:instance/i-REPLACE_WITH_INSTANCE_ID"
 
 # Set this only when the EC2 host already has an instance role. Leave null to
 # create the narrowly scoped role and instance profile in this module.

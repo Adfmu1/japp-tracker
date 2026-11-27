@@ -1,6 +1,9 @@
 # EC2 deployment executor
 
-The production deployment workflow invokes
+The production deployment workflow first resolves an approved
+`Release artifacts` workflow run on `main`, downloads its release metadata,
+checks the image repository, commit tag, and digest against ECR, and verifies
+the keyless Cosign signature. It then invokes
 `/opt/japp/bin/ec2-deployment-executor.sh` on the managed EC2 instance through
 AWS Systems Manager. The host image/bootstrap process is responsible for
 installing this script, `aws`, `cosign`, `jq`, `kubectl`, and the checked-out
@@ -29,9 +32,10 @@ Kubernetes Secret manifests through `kubectl ... --dry-run=client -o yaml |
 kubectl apply -f -`. Secret values are never arguments, status output, or
 workflow output. Temporary files are removed on exit.
 
-The executor applies the migration Job and waits for completion before applying
-the application Deployment. A migration failure emits `migration_failed` and
-exits before applying the Deployment. It records the previous digest, requires
+The executor deletes any prior completed or failed fixed-name migration Job
+before recreating it, then waits for completion before applying the application
+Deployment. A migration failure emits `migration_failed` and exits before
+applying the Deployment. It records the previous digest, requires
 rollout success (including the Deployment readiness probe), then verifies the
 public HTTPS contract: `/healthz`, database-backed `/readyz`, Gateway `Accepted`
 and `Programmed`, both HTTPRoutes `Accepted` and `ResolvedRefs`, the expected

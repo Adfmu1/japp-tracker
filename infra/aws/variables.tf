@@ -33,6 +33,11 @@ variable "secret_arns" {
   default     = []
 }
 
+variable "deployment_instance_arn" {
+  description = "Exact EC2 instance ARN that the GitHub production role may target with SSM commands."
+  type        = string
+}
+
 variable "production_secret_names" {
   description = "Names for the application and database secret containers. Values are never managed by Terraform."
   type = object({
