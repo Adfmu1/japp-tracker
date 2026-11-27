@@ -50,6 +50,7 @@ jobs:
             for attempt in $(seq 1 60); do
               conclusion="$(
                 gh run list \
+                  --repo "$GITHUB_REPOSITORY" \
                   --workflow "$workflow" \
                   --commit "$RELEASE_SHA" \
                   --limit 1 \
